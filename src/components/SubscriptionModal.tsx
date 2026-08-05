@@ -410,61 +410,55 @@ export default function SubscriptionModal({ onClose }: Props) {
               </p>
             </div>
 
-            {/* KHQR card — styled payment card with the real QR embedded */}
-            <div className="px-4 pb-2">
+            {/* KHQR card — the uploaded image IS the full card (header/merchant/price/QR already baked in) */}
+            <div className="px-6 pb-2">
               <div
-                className="overflow-hidden"
+                className="relative mx-auto overflow-hidden"
                 style={{
-                  borderRadius: 18,
-                  boxShadow: '0 8px 40px rgba(0,0,0,0.65), 0 1px 4px rgba(0,0,0,0.4)',
+                  borderRadius: 20,
+                  width: '100%',
+                  maxWidth: 300,
+                  minHeight: qrLoaded || qrFailed ? undefined : 360,
+                  boxShadow: '0 10px 44px rgba(0,0,0,0.65), 0 1px 4px rgba(0,0,0,0.4)',
                   background: '#fff',
                 }}
               >
-                {/* Red KHQR header */}
-                <div className="flex items-center justify-center py-3" style={{ background: '#D0191C' }}>
-                  <span className="text-[19px] font-black tracking-[0.22em] text-white">KHQR</span>
-                </div>
-
-                {/* Merchant + price */}
-                <div className="px-5 pt-4">
-                  <p className="text-[13px] font-bold text-gray-800">{KHQR_MERCHANT_NAME}</p>
-                  <p className="mt-1.5 text-[30px] font-black leading-none text-gray-900">
-                    $ {selectedPlan.price}.00
-                  </p>
-                </div>
-
-                <div className="mx-5 my-4" style={{ borderTop: '1.5px dashed #d1d5db' }} />
-
-                {/* Actual QR image, sized like the reference (large, square, centered) */}
-                <div className="px-5 pb-5">
-                  <div
-                    className="relative mx-auto flex items-center justify-center overflow-hidden rounded-xl bg-gray-50"
-                    style={{ width: '100%', aspectRatio: '1 / 1', maxWidth: 320 }}
-                  >
-                    {!qrLoaded && !qrFailed && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
-                        <div className="h-7 w-7 animate-spin rounded-full border-2 border-gray-200 border-t-[#D0191C]" />
-                      </div>
-                    )}
-                    {qrFailed ? (
-                      <div className="text-center">
-                        <QrCode size={56} className="mx-auto mb-2 text-gray-300" />
-                        <p className="text-[10px] text-gray-400">
-                          {km ? 'មិនអាចផ្ទុក QR បានទេ' : 'QR not available'}
-                        </p>
-                      </div>
-                    ) : (
-                      <img
-                        src={PLAN_QR[selected]}
-                        alt={`KHQR $${selectedPlan.price}`}
-                        className="h-full w-full object-contain p-2"
-                        style={{ display: qrLoaded ? 'block' : 'none' }}
-                        onLoad={() => setQrLoaded(true)}
-                        onError={() => { setQrFailed(true); setQrLoaded(true); }}
-                      />
-                    )}
+                {!qrLoaded && !qrFailed && (
+                  <div className="flex h-[360px] items-center justify-center bg-white">
+                    <div className="h-7 w-7 animate-spin rounded-full border-2 border-gray-200 border-t-[#D0191C]" />
                   </div>
-                </div>
+                )}
+
+                {qrFailed ? (
+                  /* Fallback card — only shown if the uploaded QR image fails to load */
+                  <div className="bg-white">
+                    <div className="flex items-center justify-center py-3" style={{ background: '#D0191C' }}>
+                      <span className="text-[18px] font-black tracking-[0.2em] text-white">KHQR</span>
+                    </div>
+                    <div className="px-5 py-4">
+                      <p className="text-[13px] font-bold text-gray-800">{KHQR_MERCHANT_NAME}</p>
+                      <p className="mt-2 text-[28px] font-black text-gray-900">$ {selectedPlan.price}.00</p>
+                      <div className="my-4" style={{ borderTop: '1.5px dashed #d1d5db' }} />
+                      <div className="flex h-[220px] items-center justify-center rounded-xl bg-gray-100">
+                        <div className="text-center">
+                          <QrCode size={48} className="mx-auto mb-2 text-gray-300" />
+                          <p className="text-[10px] text-gray-400">
+                            {km ? 'មិនអាចផ្ទុក QR បានទេ' : 'QR not available'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <img
+                    src={PLAN_QR[selected]}
+                    alt={`KHQR $${selectedPlan.price}`}
+                    className="block w-full"
+                    style={{ display: qrLoaded ? 'block' : 'none' }}
+                    onLoad={() => setQrLoaded(true)}
+                    onError={() => { setQrFailed(true); setQrLoaded(true); }}
+                  />
+                )}
               </div>
             </div>
 
