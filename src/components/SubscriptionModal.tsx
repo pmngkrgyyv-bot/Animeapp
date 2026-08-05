@@ -157,8 +157,6 @@ export default function SubscriptionModal({ onClose }: Props) {
   };
 
   const urgent = secondsLeft <= 10;
-  const progress = secondsLeft / COUNTDOWN_SECONDS;
-  const circumference = 2 * Math.PI * 14;
 
   const planLabel = (p: typeof PLANS[number]) =>
     km ? p.labelKm : t[p.labelKey];
@@ -381,30 +379,15 @@ export default function SubscriptionModal({ onClose }: Props) {
                 {km ? 'ថយក្រោយ' : 'Back'}
               </button>
 
-              {/* Circular countdown */}
-              <div className="flex flex-col items-center">
-                <div className="relative flex h-12 w-12 items-center justify-center">
-                  <svg className="absolute inset-0 h-full w-full -rotate-90" viewBox="0 0 36 36">
-                    <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="2.5" />
-                    <circle
-                      cx="18" cy="18" r="14"
-                      fill="none"
-                      stroke={urgent ? '#EF4444' : '#E8A94A'}
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeDasharray={`${circumference}`}
-                      strokeDashoffset={`${circumference * (1 - progress)}`}
-                      style={{ transition: 'stroke-dashoffset 0.9s linear, stroke 0.3s ease' }}
-                    />
-                  </svg>
-                  <span
-                    className="relative text-[13px] font-black tabular-nums"
-                    style={{ color: urgent ? '#EF4444' : '#E8A94A' }}
-                  >
-                    {secondsLeft}
-                  </span>
-                </div>
-                <p className="text-[8px] text-white/30">{km ? 'វិនាទី' : 'sec'}</p>
+              {/* Countdown — plain text, no ring */}
+              <div
+                className="rounded-full px-2.5 py-1 text-[12px] font-bold tabular-nums"
+                style={{
+                  color: urgent ? '#EF4444' : '#E8A94A',
+                  background: urgent ? 'rgba(239,68,68,0.1)' : 'rgba(232,169,74,0.1)',
+                }}
+              >
+                {String(Math.floor(secondsLeft / 60)).padStart(1, '0')}:{String(secondsLeft % 60).padStart(2, '0')}
               </div>
 
               <button
