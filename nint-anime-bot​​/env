@@ -1,0 +1,9 @@
+# Token នេះបំពេញរួចហើយ (Nint_AnimeVIP_bot)
+BOT_TOKEN=8785765183:AAEIre-2ib2vNnMbSigpY8U5WyKfluy7joY
+
+# សូមចូល Supabase Dashboard > Settings > API ដើម្បីយកតម្លៃពីរនេះ
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your_service_role_key_here
+
+# សូមដាក់លីង subscribe screen ពិតរបស់ App អ្នក (ឧ. https://nintanime.app/subscribe)
+APP_SUBSCRIBE_URL=https://your-app-url.com/subscribe
