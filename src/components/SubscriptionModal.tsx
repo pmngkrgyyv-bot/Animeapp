@@ -45,7 +45,7 @@ const PLAN_QR: Record<PlanKey, string> = {
 
 const KHQR_MERCHANT_NAME = 'PANG SOK HENG S2_Nint.Ani';
 
-const COUNTDOWN_SECONDS = 60;
+const COUNTDOWN_SECONDS = 120;
 const POLL_INTERVAL_MS = 3000;
 
 interface Props {
@@ -164,10 +164,28 @@ export default function SubscriptionModal({ onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-end justify-center sm:items-center sm:p-4"
+      className="fixed inset-0 z-[90] flex items-end justify-center overflow-hidden sm:items-center sm:p-4"
       style={{ backgroundColor: 'rgba(4,4,10,0.92)', backdropFilter: 'blur(12px)' }}
       onClick={step !== 'qr' ? onClose : undefined}
     >
+      {/* Atmospheric silhouette backdrop — large dim watermark + amber glow, no click target */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <img
+          src={LOGO_URL}
+          alt=""
+          aria-hidden="true"
+          className="absolute left-1/2 top-[38%] h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 select-none object-contain opacity-[0.05] blur-[2px]"
+        />
+        <div
+          className="absolute left-1/2 top-1/2 h-[70vh] w-[70vh] -translate-x-1/2 -translate-y-1/2 rounded-full"
+          style={{ background: 'radial-gradient(circle,rgba(232,169,74,0.10) 0%,rgba(232,169,74,0) 65%)' }}
+        />
+        <div
+          className="absolute inset-0"
+          style={{ background: 'radial-gradient(ellipse at 50% 100%,rgba(0,0,0,0.5) 0%,rgba(0,0,0,0) 55%)' }}
+        />
+      </div>
+
       <div
         className="relative w-full overflow-hidden text-white"
         style={{
@@ -193,14 +211,8 @@ export default function SubscriptionModal({ onClose }: Props) {
                 <X size={15} />
               </button>
 
-              {/* Logo */}
-              <div
-                className="mx-auto mb-2.5 flex h-14 w-14 items-center justify-center rounded-2xl p-2"
-                style={{
-                  background: 'linear-gradient(155deg,rgba(232,169,74,0.14),rgba(232,169,74,0.02))',
-                  border: '1px solid rgba(232,169,74,0.18)',
-                }}
-              >
+              {/* Logo — large, centered, no background plate */}
+              <div className="mx-auto mb-2 h-24 w-24 drop-shadow-[0_4px_20px_rgba(232,169,74,0.25)]">
                 <img
                   src={LOGO_URL}
                   alt="NINT ANIME"
@@ -241,15 +253,13 @@ export default function SubscriptionModal({ onClose }: Props) {
                     <button
                       key={p.key}
                       onClick={() => setSelected(p.key)}
-                      className="relative rounded-[20px] text-left transition-all duration-150 active:scale-[0.97]"
+                      className="relative rounded-2xl pb-3 pt-5 text-left transition-all duration-150 active:scale-[0.97]"
                       style={{
-                        border: isSel ? '1.5px solid #E8A94A' : '1.5px solid rgba(255,255,255,0.07)',
+                        border: isSel ? '1.5px solid #E8A94A' : '1.5px solid rgba(255,255,255,0.06)',
                         background: isSel
-                          ? 'linear-gradient(150deg,rgba(46,34,9,1) 0%,rgba(22,17,4,1) 100%)'
-                          : 'rgba(255,255,255,0.03)',
-                        boxShadow: isSel
-                          ? '0 0 0 3px rgba(232,169,74,0.12), 0 8px 20px -6px rgba(232,169,74,0.25)'
-                          : '0 2px 8px rgba(0,0,0,0.2)',
+                          ? 'linear-gradient(150deg,rgba(40,30,8,1) 0%,rgba(24,18,4,1) 100%)'
+                          : 'rgba(255,255,255,0.025)',
+                        boxShadow: isSel ? '0 0 0 3px rgba(232,169,74,0.12)' : 'none',
                         padding: '20px 12px 12px',
                       }}
                     >
@@ -257,31 +267,23 @@ export default function SubscriptionModal({ onClose }: Props) {
                       {p.tagKey && (
                         <span
                           className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 top-0 inline-flex items-center gap-0.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-black"
-                          style={{ background: 'linear-gradient(90deg,#F0BE6E,#D4821E)', boxShadow: '0 2px 8px rgba(212,130,30,0.4)' }}
+                          style={{ background: 'linear-gradient(90deg,#E8A94A,#D4821E)' }}
                         >
                           <Sparkles size={6} />
                           {tagLabel(p)}
                         </span>
                       )}
 
-                      <p className="text-[10px] font-semibold text-white/40">{planLabel(p)}</p>
+                      <p className="text-[10px] font-medium text-white/40">{planLabel(p)}</p>
                       <p
-                        className="mt-0.5 text-[28px] font-black leading-none tracking-tight"
+                        className="mt-0.5 text-[30px] font-black leading-none tracking-tight"
                         style={{ color: isSel ? '#E8A94A' : '#3FAE8A' }}
                       >
                         ${p.price}
                       </p>
-                      <p className="mt-1 text-[9px] font-medium text-white/30">
+                      <p className="mt-1 text-[9px] text-white/30">
                         ${(p.price / p.months).toFixed(2)}/{km ? 'ខែ' : 'mo'}
                       </p>
-                      {isSel && (
-                        <div
-                          className="absolute right-2.5 top-2.5 flex h-4 w-4 items-center justify-center rounded-full"
-                          style={{ background: '#E8A94A' }}
-                        >
-                          <CheckCircle2 size={11} className="text-[#1c1a0e]" strokeWidth={3} />
-                        </div>
-                      )}
                     </button>
                   );
                 })}
@@ -289,24 +291,23 @@ export default function SubscriptionModal({ onClose }: Props) {
 
               {/* Total row */}
               <div
-                className="mt-2.5 flex items-center gap-2.5 rounded-2xl px-3.5 py-3"
+                className="mt-2.5 flex items-center gap-2.5 rounded-2xl px-3 py-2.5"
                 style={{
-                  border: '1px solid rgba(63,174,138,0.18)',
-                  background: 'linear-gradient(135deg,rgba(63,174,138,0.09),rgba(63,174,138,0.02))',
-                  boxShadow: '0 4px 16px -6px rgba(63,174,138,0.2)',
+                  border: '1px solid rgba(63,174,138,0.15)',
+                  background: 'rgba(63,174,138,0.06)',
                 }}
               >
                 <div
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
-                  style={{ background: 'linear-gradient(135deg,#14A085,#0B6E58)', boxShadow: '0 4px 10px -2px rgba(15,143,114,0.5)' }}
+                  style={{ background: 'linear-gradient(135deg,#0F8F72,#0B6E58)' }}
                 >
-                  <DollarSign size={16} className="text-white" strokeWidth={2.5} />
+                  <DollarSign size={16} className="text-white" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[11px] font-semibold text-white/70">
                     {km ? 'សរុបប្រើប្រាស់' : 'Total due'}
                   </p>
-                  <p className="text-[9.5px] font-medium text-white/35">{planLabel(selectedPlan)}</p>
+                  <p className="text-[9.5px] text-white/35">{planLabel(selectedPlan)}</p>
                 </div>
                 <p className="text-[26px] font-black text-white leading-none">
                   ${selectedPlan.price}
@@ -315,28 +316,21 @@ export default function SubscriptionModal({ onClose }: Props) {
 
               {/* Info box */}
               <div
-                className="mt-2 flex items-start gap-2.5 rounded-2xl px-3.5 py-3"
+                className="mt-2 rounded-2xl px-3 py-3"
                 style={{
-                  border: '1px solid rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(255,255,255,0.05)',
                   background: 'rgba(255,255,255,0.025)',
                 }}
               >
-                <div
-                  className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
-                  style={{ background: 'rgba(63,174,138,0.12)' }}
-                >
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold text-white/70">
                   <QrCode size={12} className="text-[#3FAE8A]" />
-                </div>
-                <div>
-                  <p className="text-[11px] font-semibold text-white/75">
-                    {km ? 'ស្វែងតាមមជ្ឈមណ្ឌលធនាគារតាមបស់ម្ចូរជើឡូច្ចាត់' : 'Scan to pay via KHQR banking app'}
-                  </p>
-                  <p className="mt-0.5 text-[9.5px] leading-relaxed text-white/35">
-                    {km
-                      ? 'ស្វែង QR តាមមជ្ឈមណ្ឌល យកចំណូលជូន ចូលប្រើ ABA Mobile ឬ App ធនាគារណាដែលគាំទ្រ KHQR — ប្រព័ន្ធនឹងបើសសិទ្ធិ VIP ដោយស្វ័យប្រវត្តិ'
-                      : 'Scan QR with ABA Mobile or any KHQR-supported banking app — VIP access unlocks automatically'}
-                  </p>
-                </div>
+                  {km ? 'ស្វែងតាមមជ្ឈមណ្ឌលធនាគារតាមបស់ម្ចូរជើឡូច្ចាត់' : 'Scan to pay via KHQR banking app'}
+                </p>
+                <p className="mt-1 text-[9.5px] leading-relaxed text-white/35">
+                  {km
+                    ? 'ស្វែង QR តាមមជ្ឈមណ្ឌល យកចំណូលជូន ចូលប្រើ ABA Mobile ឬ App ធនាគារណាដែលគាំទ្រ KHQR — ប្រព័ន្ធនឹងបើសសិទ្ធិ VIP ដោយស្វ័យប្រវត្តិ'
+                    : 'Scan QR with ABA Mobile or any KHQR-supported banking app — VIP access unlocks automatically'}
+                </p>
               </div>
 
               {error && (
@@ -348,7 +342,7 @@ export default function SubscriptionModal({ onClose }: Props) {
                 onClick={() => doCreateRequest(step === 'timeout')}
                 disabled={paying}
                 className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-[14px] font-bold text-white transition hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
-                style={{ background: 'linear-gradient(135deg,#14C79A 0%,#0A7D62 100%)', boxShadow: '0 8px 20px -6px rgba(15,143,114,0.55)' }}
+                style={{ background: 'linear-gradient(135deg,#0FAE88 0%,#0A7D62 100%)' }}
               >
                 {paying ? (
                   <Loader2 size={16} className="animate-spin" />
@@ -376,7 +370,7 @@ export default function SubscriptionModal({ onClose }: Props) {
             <div className="flex items-center justify-between px-3.5 pb-2 pt-4">
               <button
                 onClick={() => { stopTimers(); setStep('summary'); }}
-                className="flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-semibold text-white/60 transition hover:bg-white/08 hover:text-white"
+                className="flex items-center gap-1 rounded-xl px-3 py-1.5 text-[11px] font-medium text-white/60 transition hover:bg-white/08 hover:text-white"
                 style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)' }}
               >
                 <ArrowLeft size={13} />
@@ -419,12 +413,12 @@ export default function SubscriptionModal({ onClose }: Props) {
             </div>
 
             {/* Scan instruction */}
-            <div className="flex flex-col items-center gap-1 px-4 pb-2.5 text-center">
-              <p className="flex items-center gap-1.5 text-[13.5px] font-bold text-white">
-                <ImageIcon size={13} className="text-[#E8A94A]" />
+            <div className="flex flex-col items-center gap-1 px-4 pb-3 text-center">
+              <p className="flex items-center gap-1.5 text-[14px] font-bold text-white">
+                <ImageIcon size={14} className="text-[#E8A94A]" />
                 {km ? 'ស្កេន និងរក្សាទុក QR' : 'Scan & Save QR'}
               </p>
-              <p className="max-w-[270px] text-[10px] leading-relaxed text-white/40">
+              <p className="max-w-[280px] text-[10.5px] leading-relaxed text-white/40">
                 {km
                   ? 'ស្កេនតាមកម្មវិធីធនាគារ KHQR ណាមួយ ឬថតរក្សាទុក ហើយបើកពីវិចិត្រសាល (gallery) របស់អ្នក'
                   : 'Scan with any KHQR banking app, or save the QR and upload it from your gallery'}
@@ -450,7 +444,7 @@ export default function SubscriptionModal({ onClose }: Props) {
                   <span className="text-[14px] font-black tracking-[0.2em] text-white">KHQR</span>
                 </div>
 
-                {/* Merchant + price */}
+                {/* Merchant + price — no background plate, just clean type on white */}
                 <div className="px-4 pt-3">
                   <p className="truncate text-[10.5px] font-bold text-gray-700">{KHQR_MERCHANT_NAME}</p>
                   <p className="mt-1 text-[22px] font-black leading-none text-gray-900">
@@ -464,12 +458,7 @@ export default function SubscriptionModal({ onClose }: Props) {
                 <div className="px-4 pb-4">
                   <div
                     className="relative mx-auto flex items-center justify-center overflow-hidden rounded-xl bg-gray-50"
-                    style={{
-                      width: '100%',
-                      aspectRatio: '1 / 1',
-                      maxWidth: 168,
-                      border: '1px solid #f0f1f3',
-                    }}
+                    style={{ width: '100%', aspectRatio: '1 / 1', maxWidth: 168, border: '1px solid #f0f1f3' }}
                   >
                     {!qrLoaded && !qrFailed && (
                       <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
@@ -519,20 +508,15 @@ export default function SubscriptionModal({ onClose }: Props) {
               className="mx-4 mb-2 flex items-center gap-2.5 rounded-xl px-3 py-2.5"
               style={{
                 border: '1px solid rgba(15,143,114,0.2)',
-                background: 'linear-gradient(135deg,rgba(15,143,114,0.09),rgba(15,143,114,0.02))',
+                background: 'rgba(15,143,114,0.07)',
               }}
             >
-              <div
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
-                style={{ background: 'rgba(15,143,114,0.15)' }}
-              >
-                <Loader2 size={13} className="animate-spin text-[#14C79A]" />
-              </div>
+              <Loader2 size={13} className="animate-spin shrink-0 text-[#0F8F72]" />
               <div>
                 <p className="text-[11px] font-semibold text-white/70">
                   {km ? 'កំពុងរង់ចាំការទូទាត់…' : 'Waiting for payment…'}
                 </p>
-                <p className="text-[9px] font-medium text-white/35">
+                <p className="text-[9px] text-white/35">
                   {km ? 'ដោះសោ VIP ស្វ័យប្រវត្តិពេល ABA បញ្ជាក់' : 'Auto-unlocks when ABA confirms'}
                 </p>
               </div>
@@ -553,15 +537,12 @@ export default function SubscriptionModal({ onClose }: Props) {
           <div className="flex flex-col items-center px-5 py-10 text-center">
             <div
               className="mb-5 flex h-20 w-20 items-center justify-center rounded-full"
-              style={{
-                background: 'radial-gradient(circle,rgba(34,197,94,0.22),rgba(34,197,94,0.03))',
-                boxShadow: '0 0 0 1px rgba(34,197,94,0.15), 0 8px 24px -6px rgba(34,197,94,0.35)',
-              }}
+              style={{ background: 'radial-gradient(circle,rgba(34,197,94,0.2),rgba(34,197,94,0.04))' }}
             >
-              <CheckCircle2 size={40} className="text-[#22C55E]" strokeWidth={2} />
+              <CheckCircle2 size={42} className="text-[#22C55E]" />
             </div>
-            <p className="flex items-center gap-1.5 text-[17px] font-extrabold tracking-tight text-white">
-              <Crown size={16} fill="#E8A94A" strokeWidth={0} />
+            <p className="flex items-center gap-1.5 text-[16px] font-bold text-white">
+              <Crown size={15} fill="#E8A94A" strokeWidth={0} />
               {km ? 'អ្នកគឺជាសមាជិក VIP ហើយ!' : t.subYourePremium}
             </p>
             <p className="mx-auto mt-2 max-w-[240px] text-[10.5px] leading-relaxed text-white/50">
@@ -569,8 +550,8 @@ export default function SubscriptionModal({ onClose }: Props) {
             </p>
             <button
               onClick={onClose}
-              className="mt-6 rounded-full px-8 py-3 text-[13px] font-bold text-white transition hover:brightness-110 active:scale-[0.98]"
-              style={{ background: 'linear-gradient(135deg,#14C79A 0%,#0A7D62 100%)', boxShadow: '0 8px 20px -6px rgba(15,143,114,0.55)' }}
+              className="mt-6 rounded-2xl px-8 py-3 text-[13px] font-bold text-white transition hover:brightness-110 active:scale-[0.98]"
+              style={{ background: 'linear-gradient(135deg,#0FAE88 0%,#0A7D62 100%)' }}
             >
               {km ? 'ចាប់ផ្ដើមមើល' : t.subStartWatching}
             </button>
