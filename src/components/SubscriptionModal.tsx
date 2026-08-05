@@ -66,6 +66,7 @@ export default function SubscriptionModal({ onClose }: Props) {
   const [paying, setPaying] = useState(false);
   const [qrLoaded, setQrLoaded] = useState(false);
   const [qrFailed, setQrFailed] = useState(false);
+  const [qrSaved, setQrSaved] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -82,9 +83,11 @@ export default function SubscriptionModal({ onClose }: Props) {
   useEffect(() => {
     setQrLoaded(false);
     setQrFailed(false);
+    setQrSaved(false);
   }, [selected]);
 
   const saveQr = async () => {
+    setQrSaved(true);
     try {
       const res = await fetch(PLAN_QR[selected]);
       const blob = await res.blob();
@@ -109,6 +112,7 @@ export default function SubscriptionModal({ onClose }: Props) {
   const startListening = (requestId: string) => {
     setSecondsLeft(COUNTDOWN_SECONDS);
     setStep('qr');
+    setQrSaved(false);
     let remaining = COUNTDOWN_SECONDS;
     stopTimers();
     countdownRef.current = setInterval(() => {
@@ -477,24 +481,32 @@ export default function SubscriptionModal({ onClose }: Props) {
               </button>
             </div>
 
-            {/* Waiting indicator */}
-            <div
-              className="mx-4 mb-2 flex items-center gap-2.5 rounded-xl px-3 py-2.5"
-              style={{
-                border: '1px solid rgba(15,143,114,0.2)',
-                background: 'rgba(15,143,114,0.07)',
-              }}
-            >
-              <Loader2 size={13} className="animate-spin shrink-0 text-[#0F8F72]" />
-              <div>
-                <p className="text-[11px] font-semibold text-white/70">
-                  {km ? 'កំពុងរង់ចាំការទូទាត់…' : 'Waiting for payment…'}
-                </p>
-                <p className="text-[9px] text-white/35">
-                  {km ? 'ដោះសោ VIP ស្វ័យប្រវត្តិពេល ABA បញ្ជាក់' : 'Auto-unlocks when ABA confirms'}
-                </p>
+            {/* Small "waiting for payment" modal — only appears once the user taps Save QR */}
+            {qrSaved && (
+              <div
+                className="mx-4 mb-2 flex animate-slide-up-fade items-center gap-2.5 rounded-2xl px-3.5 py-3"
+                style={{
+                  border: '1px solid rgba(15,143,114,0.25)',
+                  background: 'linear-gradient(135deg,rgba(15,143,114,0.12),rgba(15,143,114,0.04))',
+                  boxShadow: '0 8px 24px -8px rgba(15,143,114,0.35)',
+                }}
+              >
+                <div
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
+                  style={{ background: 'rgba(15,143,114,0.15)' }}
+                >
+                  <Loader2 size={13} className="animate-spin text-[#14C79A]" />
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-white/80">
+                    {km ? 'កំពុងរង់ចាំការទូទាត់…' : 'Waiting for payment…'}
+                  </p>
+                  <p className="text-[9px] text-white/40">
+                    {km ? 'ដោះសោ VIP ស្វ័យប្រវត្តិពេល ABA បញ្ជាក់' : 'Auto-unlocks when ABA confirms'}
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Footer */}
             <div className="flex items-center justify-center gap-1.5 border-t border-white/[0.04] py-2.5">
