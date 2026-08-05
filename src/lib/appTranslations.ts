@@ -189,6 +189,9 @@ export const appText = {
     subPayNow: 'Pay',
     subStep2Title: 'Scan & save the QR',
     subStep2Desc: 'Scan with any KHQR banking app, or save the image and open it from your gallery.',
+    subWaitingPayment: 'Waiting for payment…',
+    subAutoUnlockNote: 'Leave this screen open. VIP unlocks automatically when ABA confirms.',
+    subSecFooter: 'Secured checkout · Powered by ABA PayWay KHQR',
     subIveSavedQr: "I've Saved the QR",
     subNoticeTitle: 'One last step to unlock',
     subNoticeBody:
@@ -230,6 +233,24 @@ export const appText = {
     subFailedTitle: "Verification didn't complete in time",
     subFailedBody:
       "We couldn't confirm this payment within 1 hour. Please message our admin on Telegram with your receipt so we can unlock it for you right away.",
+
+    // Subscription modal — new KHQR flow
+    subPayTitle: 'Pay with KHQR',
+    subPayDesc:
+      'Scan the QR with any banking app, or save it to your photos and scan from there. We detect your payment automatically — no proof needed.',
+    subSaveOrScan: 'Save QR to Photos',
+    subScanHint: 'Scan with any KHQR banking app',
+    subListeningTitle: 'Listening for your payment',
+    subListeningDesc:
+      "Leave this screen open. Your VIP unlocks automatically the moment ABA sends confirmation — usually within a few seconds.",
+    subTimeoutTitle: 'Time ran out',
+    subTimeoutDesc:
+      "We didn't receive a confirmation in 60 seconds. If you already paid, tap below to start a new session — your previous payment is still being watched.",
+    subPayAgain: 'Start New Session',
+    subSecAuto: 'Auto-unlock · No upload needed',
+    subPlanPerMonth: 'per month',
+    subBestPick: 'Best pick',
+    subMostPopular: 'Most popular',
 
     // Locked episode row
     lockedVip: 'VIP',
@@ -449,6 +470,9 @@ export const appText = {
     subPayNow: 'ទូទាត់',
     subStep2Title: 'ស្កេន និង រក្សាទុក QR',
     subStep2Desc: 'ស្កេនតាមកម្មវិធីធនាគារ KHQR ណាមួយ ឬរក្សាទុករូបភាព ហើយបើកពីវិចិត្រសាល (gallery) របស់អ្នក។',
+    subWaitingPayment: 'រង់ចាំការទូទាត់…',
+    subAutoUnlockNote: 'ទុកផ្ទាំងនេះបើក។ VIP ដោះសោស្វ័យប្រវត្តិពេល ABA បញ្ជាក់ហើយ។',
+    subSecFooter: 'ការទូទាត់មានសុវត្ថិភាព · ដំណើរការដោយ ABA PayWay KHQR',
     subIveSavedQr: 'ខ្ញុំបានរក្សាទុក QR ហើយ',
     subNoticeTitle: 'នៅសល់មួយជំហានទៀត ដើម្បីដោះសោ',
     subNoticeBody:
@@ -490,6 +514,24 @@ export const appText = {
     subFailedTitle: 'ការផ្ទៀងផ្ទាត់មិនចប់ក្នុងពេលកំណត់',
     subFailedBody:
       'យើងមិនអាចបញ្ជាក់ការទូទាត់នេះក្នុងរយៈពេល ១ម៉ោងបានទេ។ សូមផ្ញើសារទៅអភិបាលតាម Telegram ជាមួយវិក្កយបត្ររបស់អ្នក ដើម្បីឱ្យយើងជួយដោះសោភ្លាមៗ។',
+
+    // Subscription modal — new KHQR flow
+    subPayTitle: 'បង់ប្រាក់តាម KHQR',
+    subPayDesc:
+      'ស្កេន QR ជាមួយកម្មវិធីធនារណាមួយ ឬរក្សាទុកក្នុងរូបថត រួចស្កេនពីទីនោះ។ ប្រព័ន្ធណ់ការទូទាត់ដោយស្វ័យប្រវត្តិ — មិនចាំបាច់ផ្ញើរូបភាព។',
+    subSaveOrScan: 'រក្សាទុក QR ក្នុងរូបថត',
+    subScanHint: 'ស្កេនជាមួយកម្មវិធី KHQR ណាមួយ',
+    subListeningTitle: 'កំពុងរង់ចាំការទូទាត់',
+    subListeningDesc:
+      'ទុក​画面​នេះ​ឱ្យ​បើក​ចំហ។ VIP របស់​អ្នក​នឹង​ដោះសោ​ដោយ​ស្វ័យប្រវត្តិ​នៅ​ពេល ABA ផ្ញើ​ការ​បញ្ជាក់ — ជា​ធម្មតា​លឿន​ណាស់។',
+    subTimeoutTitle: 'ពេលវេលាបានផុត',
+    subTimeoutDesc:
+      'យើងមិនទទួលបានការបញ្ជាក់ក្នុង ៦០ វិនាទីទេ។ បើអ្នកបានទូទាត់ហើយ សូមចុចខាងក្រោមដើម្បីចាប់ផ្ដើមសម័យថ្មី — ការទូទាត់មុននៅតែត្រូវបានតាមដាន។',
+    subPayAgain: 'ចាប់ផ្ដើមសម័យថ្មី',
+    subSecAuto: 'ដោះសោស្វ័យប្រវត្តិ · មិនចាំបាច់ផ្ញើរូបភាព',
+    subPlanPerMonth: 'ក្នុង ១ខែ',
+    subBestPick: 'ល្អបំផុត',
+    subMostPopular: 'ពេញនិយម',
 
     // Locked episode row
     lockedVip: 'VIP',
