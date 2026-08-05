@@ -2,30 +2,22 @@ import { useEffect, useRef, useState } from 'react';
 import {
   X,
   Crown,
-  QrCode,
-  Download,
-  Upload,
   CheckCircle2,
   Loader2,
-  RefreshCw,
   Sparkles,
-  DollarSign,
-  BadgeCheck,
-  ImagePlus,
-  XCircle,
-  ArrowLeft,
-  Send,
+  Download,
+  ShieldCheck,
   Clock,
+  ArrowLeft,
+  DollarSign,
+  QrCode,
+  ImageIcon,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/supabaseClient';
 import { useLang } from '@/lib/useLang';
 import { appText } from '@/lib/appTranslations';
-import { verifyReceiptScreenshot, ReceiptOcrResult } from '@/lib/receiptOcr';
 
 const LOGO_URL = '/assets/images/logo-transparent.png';
-
-// TODO: replace with the real admin support chat link once it's ready.
-const ADMIN_TELEGRAM_LINK = 'https://t.me/';
 
 type PlanKey = '1m' | '2m' | '6m' | '1y';
 
@@ -34,18 +26,16 @@ const PLANS: {
   months: number;
   price: number;
   labelKey: 'sub1Month' | 'sub2Months' | 'sub6Months' | 'sub12Months';
+  labelKm: string;
   tagKey?: 'subPopular' | 'subBestValue';
+  tagKm?: string;
 }[] = [
-  { key: '1m', months: 1, price: 2, labelKey: 'sub1Month' },
-  { key: '2m', months: 2, price: 4, labelKey: 'sub2Months' },
-  { key: '6m', months: 6, price: 7, labelKey: 'sub6Months', tagKey: 'subPopular' },
-  { key: '1y', months: 12, price: 28, labelKey: 'sub12Months', tagKey: 'subBestValue' },
+  { key: '1m', months: 1, price: 2, labelKey: 'sub1Month', labelKm: '១ ខែ' },
+  { key: '2m', months: 2, price: 4, labelKey: 'sub2Months', labelKm: '២ ខែ' },
+  { key: '6m', months: 6, price: 7, labelKey: 'sub6Months', labelKm: '៦ ខែ', tagKey: 'subPopular', tagKm: 'ពេញនិយម' },
+  { key: '1y', months: 12, price: 28, labelKey: 'sub12Months', labelKm: '១២ ខែ', tagKey: 'subBestValue', tagKm: 'ល្អបំផុត' },
 ];
 
-// Bundled with the app itself (public/assets/images) — the QR image
-// already has the logo, plan name, and price baked in, so it always
-// renders instantly and never depends on an edge function or storage
-// bucket being configured.
 const PLAN_QR: Record<PlanKey, string> = {
   '1m': '/assets/images/subscription-1m.png',
   '2m': '/assets/images/subscription-2m.png',
@@ -53,100 +43,95 @@ const PLAN_QR: Record<PlanKey, string> = {
   '1y': '/assets/images/subscription-1y.png',
 };
 
-// A pending manual-review request auto-fails after this long, so nobody is
-// left waiting forever if it isn't picked up.
-const REVIEW_TIMEOUT_MS = 60 * 60 * 1000;
-const POLL_INTERVAL_MS = 15000;
+const KHQR_MERCHANT_NAME = 'PANG SOK HENG S2_Nint.Ani';
 
-function QrPaymentCard({ qrSrc }: { qrSrc: string }) {
-  return (
-    <div className="flex flex-col items-center py-1">
-      <img
-        key={qrSrc}
-        src={qrSrc}
-        alt="Payment QR"
-        className="h-64 w-64 rounded-2xl bg-white p-2 object-contain shadow-lg"
-      />
-    </div>
-  );
-}
-
-function CheckRow({ ok, label }: { ok: boolean | null; label: string }) {
-  return (
-    <div className="flex items-center gap-2 py-1">
-      {ok === true && <CheckCircle2 size={14} className="shrink-0 text-[#22C55E]" />}
-      {ok === false && <XCircle size={14} className="shrink-0 text-[#EF4444]" />}
-      {ok === null && <Clock size={14} className="shrink-0 text-white/30" />}
-      <p className="text-[11px] text-white/70">{label}</p>
-    </div>
-  );
-}
+const COUNTDOWN_SECONDS = 60;
+const POLL_INTERVAL_MS = 3000;
 
 interface Props {
   onClose: () => void;
 }
 
-type Step = 'summary' | 'qr' | 'upload' | 'checking' | 'mismatch' | 'duplicate' | 'pending' | 'success' | 'failed';
+type Step = 'summary' | 'qr' | 'success' | 'timeout';
 
 export default function SubscriptionModal({ onClose }: Props) {
   const { lang } = useLang();
   const t = appText[lang];
+  const km = lang === 'km';
 
-  const [selected, setSelected] = useState<PlanKey>('1y');
+  const [selected, setSelected] = useState<PlanKey>('6m');
   const [step, setStep] = useState<Step>('summary');
   const [error, setError] = useState('');
+  const [secondsLeft, setSecondsLeft] = useState(COUNTDOWN_SECONDS);
+  const [paying, setPaying] = useState(false);
+  const [qrLoaded, setQrLoaded] = useState(false);
+  const [qrFailed, setQrFailed] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [ocrResult, setOcrResult] = useState<ReceiptOcrResult | null>(null);
-  const [proofUrl, setProofUrl] = useState<string | null>(null);
-  const [bonusDays, setBonusDays] = useState(0);
-
-  const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
-  const [reviewDeadline, setReviewDeadline] = useState<number | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState(0);
-  const [pendingCreatedAt, setPendingCreatedAt] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const selectedPlan = PLANS.find((p) => p.key === selected)!;
 
   const stopTimers = () => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    if (countdownRef.current) clearInterval(countdownRef.current);
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
   };
 
-  useEffect(() => stopTimers, []);
+  useEffect(() => () => stopTimers(), []);
 
   useEffect(() => {
-    // Changing plan mid-flow starts the payment over.
-    stopTimers();
-    setStep('summary');
-    setOcrResult(null);
-    setError('');
-    setPendingRequestId(null);
-    setPendingCreatedAt(null);
+    setQrLoaded(false);
+    setQrFailed(false);
   }, [selected]);
 
-  const formatCountdown = (ms: number) => {
-    const totalSeconds = Math.max(Math.floor(ms / 1000), 0);
-    const h = Math.floor(totalSeconds / 3600);
-    const m = Math.floor((totalSeconds % 3600) / 60);
-    const s = totalSeconds % 60;
-    return h > 0
-      ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-      : `${m}:${String(s).padStart(2, '0')}`;
+  const saveQr = async () => {
+    try {
+      const res = await fetch(PLAN_QR[selected]);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `nint-anime-qr-${selected}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      const a = document.createElement('a');
+      a.href = PLAN_QR[selected];
+      a.download = `nint-anime-qr-${selected}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
   };
 
-  // Creates the pending request up front (before payment).
-  // Bot will match by amount automatically when ABA notifies.
-  const handleGenerateQr = async () => {
+  const startListening = (requestId: string) => {
+    setSecondsLeft(COUNTDOWN_SECONDS);
+    setStep('qr');
+    let remaining = COUNTDOWN_SECONDS;
+    stopTimers();
+    countdownRef.current = setInterval(() => {
+      remaining -= 1;
+      setSecondsLeft(remaining);
+      if (remaining <= 0) { stopTimers(); setStep('timeout'); }
+    }, 1000);
+    pollRef.current = setInterval(async () => {
+      const { data } = await supabase
+        .from('subscription_requests')
+        .select('status')
+        .eq('id', requestId)
+        .maybeSingle();
+      if (data?.status === 'confirmed') { stopTimers(); setStep('success'); }
+    }, POLL_INTERVAL_MS);
+  };
+
+  const doCreateRequest = async (isRetry: boolean) => {
     setError('');
+    setPaying(true);
     try {
       const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) {
-        setError(t.subNotSignedIn);
-        return;
-      }
+      if (!userData.user) { setError(t.subNotSignedIn); return; }
       const { data, error: insertError } = await supabase
         .from('subscription_requests')
         .insert({
@@ -154,645 +139,405 @@ export default function SubscriptionModal({ onClose }: Props) {
           plan: selectedPlan.key,
           amount: selectedPlan.price,
           discount: 0,
-          description: 'Awaiting payment (auto-unlock on amount match)',
+          description: isRetry ? 'Awaiting Telegram auto-confirm (retry)' : 'Awaiting Telegram auto-confirm',
         })
-        .select('id, created_at')
+        .select('id')
         .single();
-
-      if (insertError || !data) {
-        setError(insertError?.message || t.subQrGenericError);
-        return;
-      }
-
-      setPendingRequestId(data.id);
-      setPendingCreatedAt(data.created_at);
-      setStep('qr');
+      if (insertError || !data) { setError(insertError?.message || t.subQrGenericError); return; }
+      startListening(data.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : t.subQrGenericError);
+    } finally {
+      setPaying(false);
     }
   };
 
-  const handleWaitForAutoConfirm = () => {
-    if (!pendingRequestId) return;
-    startPendingWatch(pendingRequestId, pendingCreatedAt ?? new Date().toISOString());
-  };
+  const urgent = secondsLeft <= 10;
+  const progress = secondsLeft / COUNTDOWN_SECONDS;
+  const circumference = 2 * Math.PI * 14;
 
+  const planLabel = (p: typeof PLANS[number]) =>
+    km ? p.labelKm : t[p.labelKey];
 
-
-  const handleSaveQr = () => {
-    const a = document.createElement('a');
-    a.href = PLAN_QR[selected];
-    a.download = `nint-anime-payment-qr-${selected}.png`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  };
-
-  const uploadProof = async (file: File, userId: string) => {
-    const ext = file.name.split('.').pop() || 'jpg';
-    const path = `subscription-proofs/${userId}-${Date.now()}.${ext}`;
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(path, file, { upsert: true });
-    if (uploadError) throw uploadError;
-    const { data: pubData } = supabase.storage.from('avatars').getPublicUrl(path);
-    return pubData.publicUrl;
-  };
-
-  const startPendingWatch = (requestId: string, createdAtIso: string) => {
-    const deadline = new Date(createdAtIso).getTime() + REVIEW_TIMEOUT_MS;
-    setPendingRequestId(requestId);
-    setReviewDeadline(deadline);
-    setSecondsLeft(deadline - Date.now());
-    setStep('pending');
-
-    stopTimers();
-    countdownRef.current = setInterval(() => {
-      setSecondsLeft(deadline - Date.now());
-    }, 1000);
-
-    pollRef.current = setInterval(async () => {
-      const { data } = await supabase
-        .from('subscription_requests')
-        .select('status')
-        .eq('id', requestId)
-        .single();
-
-      if (data?.status === 'confirmed') {
-        stopTimers();
-        setStep('success');
-        return;
-      }
-
-      if (Date.now() >= deadline) {
-        const { data: expired } = await supabase.rpc('expire_my_pending_subscription_request', {
-          p_request_id: requestId,
-        });
-        stopTimers();
-        setStep(expired?.status === 'confirmed' ? 'success' : 'failed');
-      }
-    }, POLL_INTERVAL_MS);
-  };
-
-  const handleFileSelected = async (file: File) => {
-    setStep('checking');
-    setError('');
-    try {
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) {
-        setError(t.subNotSignedIn);
-        setStep('upload');
-        return;
-      }
-
-      const [result, url] = await Promise.all([
-        verifyReceiptScreenshot(file, selectedPlan.price),
-        uploadProof(file, userData.user.id),
-      ]);
-      setOcrResult(result);
-      setProofUrl(url);
-
-      if (result.matched) {
-        const { data: confirmed, error: rpcError } = await supabase.rpc(
-          'confirm_subscription_via_ocr',
-          {
-            p_plan: selectedPlan.key,
-            p_amount: selectedPlan.price,
-            p_proof_url: url,
-            p_ocr_text: result.rawText,
-            p_bonus_days: 10,
-            p_tran_id: result.tranId,
-          },
-        );
-        if (rpcError?.message?.includes('tran_id_reused')) {
-          // Checkpoint 4 failed: this exact receipt (by its transaction
-          // ID) was already used to confirm a different account. Name,
-          // reference, and amount all matched — a photo-edited screenshot
-          // can pass those — but the transaction ID can't be reused, so
-          // this goes straight to "already used", not the admin queue.
-          setStep('duplicate');
-          return;
-        }
-        if (rpcError || !confirmed) {
-          // Server-side re-check disagreed (or a network hiccup) — fall
-          // back to the human review queue rather than silently failing.
-          await sendForReview(userData.user.id, url, result);
-          return;
-        }
-        setBonusDays(confirmed.bonus_days ?? 10);
-        stopTimers();
-        setStep('success');
-        return;
-      }
-
-      if (!result.nameMatched && !result.refMatched) {
-        // Neither signal was found at all — this isn't a borderline OCR
-        // misread, it's almost certainly the wrong screenshot (wrong
-        // account, wrong app, or not a receipt). Tell the person right
-        // away instead of making them wait up to an hour for admin review.
-        setStep('mismatch');
-        return;
-      }
-
-      if (result.amountMatched === false) {
-        // Name/reference look right but the amount on the receipt doesn't
-        // match the selected plan — likely paid for a different plan.
-        // Reject immediately rather than auto-unlocking the wrong tier.
-        setStep('mismatch');
-        return;
-      }
-
-      await sendForReview(userData.user.id, url, result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t.subQrGenericError);
-      setStep('upload');
-    }
-  };
-
-  const sendForReview = async (userId: string, url: string, result: ReceiptOcrResult) => {
-    const notes = [
-      !result.nameMatched && 'name not detected',
-      !result.refMatched && 'reference tag not detected',
-      result.amountMatched === false && 'amount does not match selected plan',
-      result.dateText ? `date on receipt: ${result.dateText}` : 'no date detected',
-      result.timeText ? `time on receipt: ${result.timeText}` : 'no time detected',
-    ]
-      .filter(Boolean)
-      .join('; ');
-
-    const { data, error: insertError } = await supabase
-      .from('subscription_requests')
-      .insert({
-        user_id: userId,
-        plan: selectedPlan.key,
-        amount: selectedPlan.price,
-        discount: 0,
-        description: `Awaiting admin review — ${notes}`,
-        transaction_id: null,
-        payment_date: new Date().toISOString().slice(0, 10),
-        proof_url: url,
-      })
-      .select('id, created_at')
-      .single();
-
-    if (insertError || !data) {
-      setError(insertError?.message || t.subQrGenericError);
-      setStep('upload');
-      return;
-    }
-    startPendingWatch(data.id, data.created_at);
-  };
+  const tagLabel = (p: typeof PLANS[number]) =>
+    p.tagKey ? (km ? p.tagKm! : t[p.tagKey]) : '';
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center p-4"
-      style={{ backgroundColor: 'rgba(6,6,10,0.85)', backdropFilter: 'blur(8px)' }}
-      onClick={onClose}
+      className="fixed inset-0 z-[90] flex items-end justify-center sm:items-center sm:p-4"
+      style={{ backgroundColor: 'rgba(4,4,10,0.92)', backdropFilter: 'blur(12px)' }}
+      onClick={step !== 'qr' ? onClose : undefined}
     >
       <div
-        className="relative w-full max-w-sm max-h-[92vh] overflow-y-auto rounded-[28px] text-white shadow-2xl"
+        className="relative w-full overflow-hidden text-white"
         style={{
-          background: '#101018',
-          border: '1px solid rgba(232,169,74,0.18)',
-          boxShadow:
-            '0 30px 80px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.03), 0 0 60px rgba(15,143,114,0.08)',
+          maxWidth: 380,
+          background: 'linear-gradient(175deg,#1a1a2a 0%,#0e0e18 100%)',
+          border: '1px solid rgba(255,255,255,0.07)',
+          borderTopLeftRadius: 24,
+          borderTopRightRadius: 24,
+          borderBottomLeftRadius: 24,
+          borderBottomRightRadius: 24,
+          boxShadow: '0 -8px 48px rgba(0,0,0,0.6)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div
-          className="relative overflow-hidden px-5 pb-6 pt-5"
-          style={{
-            background:
-              'radial-gradient(120% 140% at 50% -20%, #262035 0%, #171626 45%, #0d0d16 100%)',
-          }}
-        >
-          <div className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-[#E8A94A]/10 blur-3xl" />
-          <div className="pointer-events-none absolute -left-10 top-10 h-32 w-32 rounded-full bg-[#0F8F72]/15 blur-3xl" />
-          <button
-            onClick={onClose}
-            className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-white/60 transition hover:bg-white/10 hover:text-white"
-          >
-            <X size={17} />
-          </button>
-          <div className="relative flex flex-col items-center pt-2 text-center">
-            <div className="mb-3 flex h-24 w-24 items-center justify-center">
-              <img
-                src={LOGO_URL}
-                alt="NINT ANIME"
-                className="h-full w-full object-contain drop-shadow-[0_6px_18px_rgba(232,169,74,0.35)]"
-                onError={(e) => {
-                  e.currentTarget.style.display = 'none';
-                }}
-              />
-            </div>
-            <p
-              className="flex items-center gap-1.5 text-lg font-extrabold tracking-wide"
-              style={{ fontFamily: '"Bebas Neue", Battambang, Inter, sans-serif', letterSpacing: '0.03em' }}
-            >
-              <Crown size={17} className="text-[#E8A94A]" fill="#E8A94A" strokeWidth={0} />
-              {t.subGoPremium}
-            </p>
-            <div className="mt-1.5 flex items-center gap-1.5">
-              <Sparkles size={12} className="text-[#E8A94A]" />
-              <p className="text-[11px] text-white/55">{t.subTagline}</p>
-            </div>
-          </div>
-        </div>
 
-        <div className="p-4">
-          {/* Plan picker — always visible while we haven't started paying */}
-          {(step === 'summary' || step === 'qr') && (
-            <>
-              <div className="mb-4 grid grid-cols-2 gap-2.5">
+        {/* ═══════════════ PLAN SELECTION ═══════════════ */}
+        {(step === 'summary' || step === 'timeout') && (
+          <div className="flex max-h-[92vh] flex-col overflow-hidden">
+            {/* Header */}
+            <div className="relative px-4 pb-2 pt-5 text-center">
+              <button
+                onClick={onClose}
+                className="absolute right-3.5 top-3.5 flex h-8 w-8 items-center justify-center rounded-full transition hover:bg-white/10"
+                style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)' }}
+              >
+                <X size={15} />
+              </button>
+
+              {/* Logo */}
+              <div className="mx-auto mb-2 h-16 w-16">
+                <img
+                  src={LOGO_URL}
+                  alt="NINT ANIME"
+                  className="h-full w-full object-contain"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              </div>
+
+              <h2 className="flex items-center justify-center gap-2 text-[17px] font-bold text-white">
+                <Crown size={16} fill="#E8A94A" strokeWidth={0} />
+                {km ? 'ក្លាយជាសមាជិក VIP' : t.subGoPremium}
+              </h2>
+              <p className="mt-1 flex items-center justify-center gap-1.5 text-[10.5px] text-white/45">
+                <Sparkles size={9} className="text-[#E8A94A]" />
+                {km ? 'មើលគ្មានដែនកំណត់ · គ្មានពាណិជ្ជកម្ម · ដោះសោភ្លាមៗ' : t.subTagline}
+              </p>
+            </div>
+
+            {/* Scrollable body */}
+            <div className="overflow-y-auto px-3.5 pb-4 pt-2" style={{ scrollbarWidth: 'none' }}>
+
+              {/* Timeout notice */}
+              {step === 'timeout' && (
+                <div
+                  className="mb-3 flex items-start gap-2 rounded-xl px-3 py-2.5"
+                  style={{ border: '1px solid rgba(239,68,68,0.2)', background: 'rgba(239,68,68,0.07)' }}
+                >
+                  <Clock size={12} className="mt-0.5 shrink-0 text-[#EF4444]" />
+                  <p className="text-[10px] leading-relaxed text-[#EF4444]/80">{t.subTimeoutDesc}</p>
+                </div>
+              )}
+
+              {/* Plan grid 2×2 */}
+              <div className="grid grid-cols-2 gap-2">
                 {PLANS.map((p) => {
-                  const isSelected = selected === p.key;
+                  const isSel = selected === p.key;
                   return (
                     <button
                       key={p.key}
                       onClick={() => setSelected(p.key)}
-                      className="relative rounded-2xl p-3 text-center transition-all duration-200"
+                      className="relative rounded-2xl pb-3 pt-5 text-left transition-all duration-150 active:scale-[0.97]"
                       style={{
-                        border: isSelected ? '1.5px solid #E8A94A' : '1.5px solid rgba(255,255,255,0.08)',
-                        background: isSelected
-                          ? 'linear-gradient(160deg, rgba(232,169,74,0.14) 0%, rgba(15,143,114,0.08) 100%)'
-                          : 'rgba(255,255,255,0.02)',
-                        transform: isSelected ? 'translateY(-2px)' : 'none',
-                        boxShadow: isSelected ? '0 8px 20px rgba(232,169,74,0.15)' : 'none',
+                        border: isSel ? '1.5px solid #E8A94A' : '1.5px solid rgba(255,255,255,0.06)',
+                        background: isSel
+                          ? 'linear-gradient(150deg,rgba(40,30,8,1) 0%,rgba(24,18,4,1) 100%)'
+                          : 'rgba(255,255,255,0.025)',
+                        boxShadow: isSel ? '0 0 0 3px rgba(232,169,74,0.12)' : 'none',
+                        padding: '20px 12px 12px',
                       }}
                     >
+                      {/* Badge — centered top edge */}
                       {p.tagKey && (
                         <span
-                          className="absolute -top-2.5 left-1/2 flex -translate-x-1/2 items-center gap-0.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-wide text-black"
-                          style={{ background: 'linear-gradient(90deg, #E8A94A, #C97A2E)' }}
+                          className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 top-0 inline-flex items-center gap-0.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-black"
+                          style={{ background: 'linear-gradient(90deg,#E8A94A,#D4821E)' }}
                         >
-                          <Sparkles size={7} />
-                          {t[p.tagKey]}
+                          <Sparkles size={6} />
+                          {tagLabel(p)}
                         </span>
                       )}
-                      <p className="mt-1 text-[11px] font-semibold text-white/80">{t[p.labelKey]}</p>
-                      <p className="mt-0.5 text-xl font-extrabold" style={{ color: isSelected ? '#E8A94A' : '#0F8F72' }}>
+
+                      <p className="text-[10px] font-medium text-white/40">{planLabel(p)}</p>
+                      <p
+                        className="mt-0.5 text-[30px] font-black leading-none tracking-tight"
+                        style={{ color: isSel ? '#E8A94A' : '#3FAE8A' }}
+                      >
                         ${p.price}
                       </p>
-                      <p className="text-[10px] text-white/35">
-                        ${(p.price / p.months).toFixed(2)}
-                        {t.subPerMonth}
+                      <p className="mt-1 text-[9px] text-white/30">
+                        ${(p.price / p.months).toFixed(2)}/{km ? 'ខែ' : 'mo'}
                       </p>
                     </button>
                   );
                 })}
               </div>
 
+              {/* Total row */}
               <div
-                className="mb-4 flex items-center justify-between rounded-2xl px-4 py-3"
-                style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className="flex h-9 w-9 items-center justify-center rounded-xl"
-                    style={{ background: 'linear-gradient(145deg,#3FD8B0,#0B6E58)' }}
-                  >
-                    <DollarSign size={16} className="text-white" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-semibold text-white/45">{t.subTotalDue}</p>
-                    <p className="text-[10px] text-white/45">{t[selectedPlan.labelKey]}</p>
-                  </div>
-                </div>
-                <p className="text-2xl font-extrabold text-white">${selectedPlan.price}</p>
-              </div>
-            </>
-          )}
-
-          {/* STEP: summary — single, honest call to action */}
-          {step === 'summary' && (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-center">
-              <div className="mb-2 flex items-center justify-center gap-1.5">
-                <QrCode size={14} className="text-[#0F8F72]" />
-                <p className="text-[11px] font-bold text-white">{t.subScanToPay}</p>
-              </div>
-              <p className="mb-3 px-2 text-[10.5px] leading-relaxed text-white/50">{t.subManualIntro}</p>
-              <button
-                onClick={handleGenerateQr}
-                className="flex w-full items-center justify-center gap-1.5 rounded-xl py-3 text-xs font-bold text-white transition hover:opacity-90"
-                style={{ background: 'linear-gradient(90deg,#0F8F72,#0B6E58)' }}
-              >
-                <DollarSign size={14} />
-                {t.subPayNow}
-              </button>
-            </div>
-          )}
-
-          {/* STEP: qr */}
-          {step === 'qr' && (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-              <div className="mb-2 flex items-center justify-center gap-1.5">
-                <QrCode size={14} className="text-[#0F8F72]" />
-                <p className="text-[11px] font-bold text-white">{t.subStep2Title}</p>
-              </div>
-              <p className="mb-2 px-2 text-center text-[10px] leading-relaxed text-white/50">{t.subStep2Desc}</p>
-
-              <QrPaymentCard qrSrc={PLAN_QR[selected]} />
-
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button
-                  onClick={handleSaveQr}
-                  className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 py-2.5 text-[11px] font-semibold text-white transition hover:bg-white/5"
-                >
-                  <Download size={13} />
-                  {t.subSaveQr}
-                </button>
-                <button
-                  onClick={handleWaitForAutoConfirm}
-                  disabled={!pendingRequestId}
-                  className="flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[11px] font-bold text-black transition hover:opacity-90 disabled:opacity-60"
-                  style={{ background: 'linear-gradient(90deg,#E8A94A,#C97A2E)' }}
-                >
-                  <CheckCircle2 size={13} />
-                  {t.subWaitAutoConfirm}
-                </button>
-              </div>
-              <button
-                onClick={() => setStep('upload')}
-                className="mt-2 inline-flex w-full items-center justify-center gap-1 text-[10px] font-semibold text-white/40 hover:text-white/60"
-              >
-                <Upload size={11} />
-                {t.subOrUploadInstead}
-              </button>
-              <button
-                onClick={() => setStep('summary')}
-                className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-white/40 hover:text-white/60"
-              >
-                <ArrowLeft size={11} />
-                {t.subBackBtn}
-              </button>
-            </div>
-          )}
-
-          {/* STEP: upload */}
-          {step === 'upload' && (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-center">
-              <div className="mb-1.5 flex items-center justify-center gap-1.5">
-                <Upload size={14} className="text-[#0F8F72]" />
-                <p className="text-[11px] font-bold text-white">{t.subUploadReceiptTitle}</p>
-              </div>
-              {error && <p className="mb-2 text-[10.5px] text-[#EF4444]">{error}</p>}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) handleFileSelected(file);
+                className="mt-2.5 flex items-center gap-2.5 rounded-2xl px-3 py-2.5"
+                style={{
+                  border: '1px solid rgba(63,174,138,0.15)',
+                  background: 'rgba(63,174,138,0.06)',
                 }}
-                className="hidden"
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex w-full items-center justify-center gap-1.5 rounded-xl py-3 text-xs font-bold text-white transition hover:opacity-90"
-                style={{ background: 'linear-gradient(90deg,#0F8F72,#0B6E58)' }}
               >
-                <ImagePlus size={14} />
-                {t.subChooseScreenshot}
-              </button>
-              <button
-                onClick={() => setStep('qr')}
-                className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-white/40 hover:text-white/60"
-              >
-                <ArrowLeft size={11} />
-                {t.subBackBtn}
-              </button>
-            </div>
-          )}
-
-          {/* STEP: checking (OCR running) */}
-          {step === 'checking' && (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-              <div className="mx-auto flex h-40 w-40 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-white/10">
-                <Loader2 size={28} className="animate-spin text-[#E8A94A]" />
-                <p className="px-4 text-center text-[10px] text-white/50">{t.subReadingImage}</p>
-              </div>
-              {ocrResult && (
-                <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.02] p-3">
-                  <CheckRow ok={ocrResult.nameMatched} label={t.subCheckNameLabel} />
-                  <CheckRow ok={ocrResult.refMatched} label={t.subCheckRefLabel} />
-                  <CheckRow ok={ocrResult.amountMatched} label={t.subCheckAmountLabel} />
-                  <CheckRow ok={ocrResult.tranId ? true : null} label={t.subCheckTranIdLabel} />
-                  <CheckRow
-                    ok={ocrResult.dateText ? ocrResult.dateRecent ?? null : null}
-                    label={ocrResult.dateText ? `${t.subCheckDateLabel}: ${ocrResult.dateText}` : t.subCheckDateLabel}
-                  />
+                <div
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+                  style={{ background: 'linear-gradient(135deg,#0F8F72,#0B6E58)' }}
+                >
+                  <DollarSign size={16} className="text-white" />
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* STEP: duplicate (receipt's transaction ID already used elsewhere) */}
-          {step === 'duplicate' && (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 py-6 text-center">
-              <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-[#EF4444]/15">
-                <XCircle size={28} className="text-[#EF4444]" />
-              </div>
-              <p className="text-[12px] font-bold text-white">{t.subDuplicateTitle}</p>
-              <p className="mt-1.5 px-3 text-[10.5px] leading-relaxed text-white/50">{t.subDuplicateBody}</p>
-
-              {ocrResult && (
-                <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.03] p-3 text-left">
-                  <CheckRow ok={ocrResult.nameMatched} label={t.subCheckNameLabel} />
-                  <CheckRow ok={ocrResult.refMatched} label={t.subCheckRefLabel} />
-                  <CheckRow ok={ocrResult.amountMatched} label={t.subCheckAmountLabel} />
-                  <CheckRow ok={false} label={t.subCheckTranIdLabel} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-semibold text-white/70">
+                    {km ? 'សរុបប្រើប្រាស់' : 'Total due'}
+                  </p>
+                  <p className="text-[9.5px] text-white/35">{planLabel(selectedPlan)}</p>
                 </div>
-              )}
-
-              <div className="mt-4 grid grid-cols-1 gap-2">
-                <a
-                  href={ADMIN_TELEGRAM_LINK}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[11px] font-bold text-black transition hover:opacity-90"
-                  style={{ background: 'linear-gradient(90deg,#E8A94A,#C97A2E)' }}
-                >
-                  <Send size={13} />
-                  {t.subContactAdminNow}
-                </a>
-                <button
-                  onClick={() => {
-                    setError('');
-                    setOcrResult(null);
-                    setStep('upload');
-                  }}
-                  className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 py-2.5 text-[11px] font-semibold text-white transition hover:bg-white/5"
-                >
-                  <RefreshCw size={13} />
-                  {t.subRetryUpload}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* STEP: mismatch (receipt clearly doesn't match — reject immediately) */}
-          {step === 'mismatch' && (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 py-6 text-center">
-              <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-[#EF4444]/15">
-                <XCircle size={28} className="text-[#EF4444]" />
-              </div>
-              <p className="text-[12px] font-bold text-white">{t.subVerifyFailed}</p>
-              <p className="mt-1.5 px-3 text-[10.5px] leading-relaxed text-white/50">{t.subVerifyFailedDesc}</p>
-
-              {ocrResult && (
-                <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.03] p-3 text-left">
-                  <CheckRow ok={ocrResult.nameMatched} label={t.subCheckNameLabel} />
-                  <CheckRow ok={ocrResult.refMatched} label={t.subCheckRefLabel} />
-                  <CheckRow ok={ocrResult.amountMatched} label={t.subCheckAmountLabel} />
-                  <CheckRow ok={ocrResult.tranId ? true : null} label={t.subCheckTranIdLabel} />
-                </div>
-              )}
-
-              <div className="mt-4 grid grid-cols-1 gap-2">
-                <button
-                  onClick={() => {
-                    setError('');
-                    setOcrResult(null);
-                    setStep('upload');
-                  }}
-                  className="flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[11px] font-bold text-black transition hover:opacity-90"
-                  style={{ background: 'linear-gradient(90deg,#E8A94A,#C97A2E)' }}
-                >
-                  <RefreshCw size={13} />
-                  {t.subRetryUpload}
-                </button>
-                <button
-                  onClick={async () => {
-                    const { data: userData } = await supabase.auth.getUser();
-                    if (userData.user && proofUrl && ocrResult) {
-                      await sendForReview(userData.user.id, proofUrl, ocrResult);
-                    }
-                  }}
-                  className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 py-2.5 text-[11px] font-semibold text-white transition hover:bg-white/5"
-                >
-                  <Upload size={13} />
-                  {t.subSendForReview}
-                </button>
-                <a
-                  href={ADMIN_TELEGRAM_LINK}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 py-2.5 text-[11px] font-semibold text-white transition hover:bg-white/5"
-                >
-                  <Send size={13} />
-                  {t.subContactAdminNow}
-                </a>
-              </div>
-            </div>
-          )}
-
-          {/* STEP: pending (awaiting admin review, 1-hour window) */}
-          {step === 'pending' && (
-            <div className="rounded-2xl p-4 text-center" style={{ border: '1px solid rgba(232,169,74,0.25)', background: 'rgba(232,169,74,0.06)' }}>
-              <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-[#E8A94A]/15">
-                <Clock size={26} className="text-[#E8A94A]" />
-              </div>
-              <p className="text-[12px] font-bold text-white">{t.subPendingTitle}</p>
-              <p className="mt-1.5 px-2 text-[10.5px] leading-relaxed text-white/60">{t.subPendingBody}</p>
-
-              {ocrResult && (
-                <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.03] p-3 text-left">
-                  <CheckRow ok={ocrResult.nameMatched} label={t.subCheckNameLabel} />
-                  <CheckRow ok={ocrResult.refMatched} label={t.subCheckRefLabel} />
-                  <CheckRow ok={ocrResult.amountMatched} label={t.subCheckAmountLabel} />
-                  <CheckRow ok={ocrResult.tranId ? true : null} label={t.subCheckTranIdLabel} />
-                </div>
-              )}
-
-              <div className="mt-3 flex items-center justify-center gap-1.5">
-                <Loader2 size={12} className="animate-spin text-[#E8A94A]" />
-                <p className="text-[10px] font-semibold text-white">
-                  {t.subPendingWaiting} ({formatCountdown(secondsLeft)})
+                <p className="text-[26px] font-black text-white leading-none">
+                  ${selectedPlan.price}
                 </p>
               </div>
 
-              <a
-                href={ADMIN_TELEGRAM_LINK}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-white/10 py-2.5 text-[11px] font-semibold text-white transition hover:bg-white/5"
-              >
-                <Send size={13} />
-                {t.subContactAdminNow}
-              </a>
-            </div>
-          )}
-
-          {/* STEP: failed (1 hour passed, unresolved) */}
-          {step === 'failed' && (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 py-6 text-center">
-              <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-[#EF4444]/15">
-                <XCircle size={28} className="text-[#EF4444]" />
-              </div>
-              <p className="text-[12px] font-bold text-white">{t.subFailedTitle}</p>
-              <p className="mt-1.5 px-3 text-[10.5px] leading-relaxed text-white/50">{t.subFailedBody}</p>
-              <div className="mt-4 grid grid-cols-1 gap-2">
-                <a
-                  href={ADMIN_TELEGRAM_LINK}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[11px] font-bold text-black transition hover:opacity-90"
-                  style={{ background: 'linear-gradient(90deg,#E8A94A,#C97A2E)' }}
-                >
-                  <Send size={13} />
-                  {t.subContactAdminNow}
-                </a>
-                <button
-                  onClick={() => {
-                    setError('');
-                    setOcrResult(null);
-                    setStep('upload');
-                  }}
-                  className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 py-2.5 text-[11px] font-semibold text-white transition hover:bg-white/5"
-                >
-                  <RefreshCw size={13} />
-                  {t.subRetryUpload}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* STEP: success */}
-          {step === 'success' && (
-            <div className="py-8 text-center">
+              {/* Info box */}
               <div
-                className="mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-full"
-                style={{ background: 'radial-gradient(circle, rgba(232,169,74,0.25) 0%, rgba(34,197,94,0.08) 70%)' }}
+                className="mt-2 rounded-2xl px-3 py-3"
+                style={{
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  background: 'rgba(255,255,255,0.025)',
+                }}
               >
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#22C55E]/20">
-                  <CheckCircle2 size={32} className="text-[#22C55E]" />
-                </div>
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold text-white/70">
+                  <QrCode size={12} className="text-[#3FAE8A]" />
+                  {km ? 'ស្វែងតាមមជ្ឈមណ្ឌលធនាគារតាមបស់ម្ចូរជើឡូច្ចាត់' : 'Scan to pay via KHQR banking app'}
+                </p>
+                <p className="mt-1 text-[9.5px] leading-relaxed text-white/35">
+                  {km
+                    ? 'ស្វែង QR តាមមជ្ឈមណ្ឌល យកចំណូលជូន ចូលប្រើ ABA Mobile ឬ App ធនាគារណាដែលគាំទ្រ KHQR — ប្រព័ន្ធនឹងបើសសិទ្ធិ VIP ដោយស្វ័យប្រវត្តិ'
+                    : 'Scan QR with ABA Mobile or any KHQR-supported banking app — VIP access unlocks automatically'}
+                </p>
               </div>
-              <p className="mt-1 flex items-center justify-center gap-1.5 text-sm font-bold text-white">
-                <Crown size={15} className="text-[#E8A94A]" fill="#E8A94A" strokeWidth={0} />
-                {t.subYourePremium}
-              </p>
-              <p className="mt-1.5 px-6 text-xs leading-relaxed text-white/50">
-                {bonusDays > 0
-                  ? `${t.subVerifySuccessDesc}`
-                  : t.subConfirmedDesc}
-              </p>
+
+              {error && (
+                <p className="mt-2 rounded-xl bg-[#EF4444]/10 px-3 py-2 text-[10.5px] text-[#EF4444]">{error}</p>
+              )}
+
+              {/* Pay button */}
               <button
-                onClick={onClose}
-                className="mt-4 rounded-xl px-6 py-2.5 text-xs font-bold text-black transition hover:opacity-90"
-                style={{ background: 'linear-gradient(90deg,#E8A94A,#C97A2E)' }}
+                onClick={() => doCreateRequest(step === 'timeout')}
+                disabled={paying}
+                className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-[14px] font-bold text-white transition hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
+                style={{ background: 'linear-gradient(135deg,#0FAE88 0%,#0A7D62 100%)' }}
               >
-                {t.subStartWatching}
+                {paying ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <DollarSign size={16} />
+                )}
+                {km ? (step === 'timeout' ? 'ចាប់ផ្ដើមម្ដងទៀត' : 'ទូទាត់') : (step === 'timeout' ? 'Try Again' : 'Pay Now')}
               </button>
             </div>
-          )}
 
-          <div className="flex items-center justify-center gap-1.5 pb-1 pt-3">
-            <BadgeCheck size={11} className="text-white/30" />
-            <p className="text-[9.5px] text-white/30">{t.subSecuredCheckout}</p>
+            {/* Footer */}
+            <div className="flex items-center justify-center gap-1.5 border-t border-white/[0.04] py-2.5">
+              <ShieldCheck size={9} className="text-white/25" />
+              <p className="text-[8.5px] text-white/25">
+                {km ? 'ការទូទាត់មានសុវត្ថិភាព · ដំណើរការដោយ ABA PayWay KHQR' : t.subSecFooter ?? 'Secured checkout · Powered by ABA PayWay KHQR'}
+              </p>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* ═══════════════ QR PAYMENT STEP ═══════════════ */}
+        {step === 'qr' && (
+          <div className="flex flex-col overflow-hidden">
+            {/* Top bar */}
+            <div className="flex items-center justify-between px-3.5 pb-2 pt-4">
+              <button
+                onClick={() => { stopTimers(); setStep('summary'); }}
+                className="flex items-center gap-1 rounded-xl px-3 py-1.5 text-[11px] font-medium text-white/60 transition hover:bg-white/08 hover:text-white"
+                style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)' }}
+              >
+                <ArrowLeft size={13} />
+                {km ? 'ថយក្រោយ' : 'Back'}
+              </button>
+
+              {/* Circular countdown */}
+              <div className="flex flex-col items-center">
+                <div className="relative flex h-12 w-12 items-center justify-center">
+                  <svg className="absolute inset-0 h-full w-full -rotate-90" viewBox="0 0 36 36">
+                    <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="2.5" />
+                    <circle
+                      cx="18" cy="18" r="14"
+                      fill="none"
+                      stroke={urgent ? '#EF4444' : '#E8A94A'}
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeDasharray={`${circumference}`}
+                      strokeDashoffset={`${circumference * (1 - progress)}`}
+                      style={{ transition: 'stroke-dashoffset 0.9s linear, stroke 0.3s ease' }}
+                    />
+                  </svg>
+                  <span
+                    className="relative text-[13px] font-black tabular-nums"
+                    style={{ color: urgent ? '#EF4444' : '#E8A94A' }}
+                  >
+                    {secondsLeft}
+                  </span>
+                </div>
+                <p className="text-[8px] text-white/30">{km ? 'វិនាទី' : 'sec'}</p>
+              </div>
+
+              <button
+                onClick={onClose}
+                className="flex h-8 w-8 items-center justify-center rounded-full transition hover:bg-white/10"
+                style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.45)' }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Scan instruction */}
+            <div className="flex flex-col items-center gap-1 px-4 pb-3 text-center">
+              <p className="flex items-center gap-1.5 text-[14px] font-bold text-white">
+                <ImageIcon size={14} className="text-[#E8A94A]" />
+                {km ? 'ស្កេន និងរក្សាទុក QR' : 'Scan & Save QR'}
+              </p>
+              <p className="max-w-[280px] text-[10.5px] leading-relaxed text-white/40">
+                {km
+                  ? 'ស្កេនតាមកម្មវិធីធនាគារ KHQR ណាមួយ ឬថតរក្សាទុក ហើយបើកពីវិចិត្រសាល (gallery) របស់អ្នក'
+                  : 'Scan with any KHQR banking app, or save the QR and upload it from your gallery'}
+              </p>
+            </div>
+
+            {/* KHQR card — styled payment card with the real QR embedded */}
+            <div className="px-4 pb-2">
+              <div
+                className="overflow-hidden"
+                style={{
+                  borderRadius: 18,
+                  boxShadow: '0 8px 40px rgba(0,0,0,0.65), 0 1px 4px rgba(0,0,0,0.4)',
+                  background: '#fff',
+                }}
+              >
+                {/* Red KHQR header */}
+                <div className="flex items-center justify-center py-3" style={{ background: '#D0191C' }}>
+                  <span className="text-[19px] font-black tracking-[0.22em] text-white">KHQR</span>
+                </div>
+
+                {/* Merchant + price */}
+                <div className="px-5 pt-4">
+                  <p className="text-[13px] font-bold text-gray-800">{KHQR_MERCHANT_NAME}</p>
+                  <p className="mt-1.5 text-[30px] font-black leading-none text-gray-900">
+                    $ {selectedPlan.price}.00
+                  </p>
+                </div>
+
+                <div className="mx-5 my-4" style={{ borderTop: '1.5px dashed #d1d5db' }} />
+
+                {/* Actual QR image, sized like the reference (large, square, centered) */}
+                <div className="px-5 pb-5">
+                  <div
+                    className="relative mx-auto flex items-center justify-center overflow-hidden rounded-xl bg-gray-50"
+                    style={{ width: '100%', aspectRatio: '1 / 1', maxWidth: 320 }}
+                  >
+                    {!qrLoaded && !qrFailed && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+                        <div className="h-7 w-7 animate-spin rounded-full border-2 border-gray-200 border-t-[#D0191C]" />
+                      </div>
+                    )}
+                    {qrFailed ? (
+                      <div className="text-center">
+                        <QrCode size={56} className="mx-auto mb-2 text-gray-300" />
+                        <p className="text-[10px] text-gray-400">
+                          {km ? 'មិនអាចផ្ទុក QR បានទេ' : 'QR not available'}
+                        </p>
+                      </div>
+                    ) : (
+                      <img
+                        src={PLAN_QR[selected]}
+                        alt={`KHQR $${selectedPlan.price}`}
+                        className="h-full w-full object-contain p-2"
+                        style={{ display: qrLoaded ? 'block' : 'none' }}
+                        onLoad={() => setQrLoaded(true)}
+                        onError={() => { setQrFailed(true); setQrLoaded(true); }}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Save button */}
+            <div className="px-4 pb-2">
+              <button
+                onClick={saveQr}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-[12.5px] font-semibold transition hover:brightness-110 active:scale-[0.98]"
+                style={{
+                  border: '1.5px solid rgba(255,255,255,0.1)',
+                  background: 'rgba(255,255,255,0.05)',
+                  color: 'rgba(255,255,255,0.75)',
+                }}
+              >
+                <Download size={14} />
+                {km ? 'រក្សាទុក QR' : 'Save QR'}
+              </button>
+            </div>
+
+            {/* Waiting indicator */}
+            <div
+              className="mx-4 mb-2 flex items-center gap-2.5 rounded-xl px-3 py-2.5"
+              style={{
+                border: '1px solid rgba(15,143,114,0.2)',
+                background: 'rgba(15,143,114,0.07)',
+              }}
+            >
+              <Loader2 size={13} className="animate-spin shrink-0 text-[#0F8F72]" />
+              <div>
+                <p className="text-[11px] font-semibold text-white/70">
+                  {km ? 'កំពុងរង់ចាំការទូទាត់…' : 'Waiting for payment…'}
+                </p>
+                <p className="text-[9px] text-white/35">
+                  {km ? 'ដោះសោ VIP ស្វ័យប្រវត្តិពេល ABA បញ្ជាក់' : 'Auto-unlocks when ABA confirms'}
+                </p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-center gap-1.5 border-t border-white/[0.04] py-2.5">
+              <ShieldCheck size={9} className="text-white/25" />
+              <p className="text-[8.5px] text-white/25">
+                {km ? 'ការទូទាត់មានសុវត្ថិភាព · ដំណើរការដោយ ABA PayWay KHQR' : t.subSecFooter ?? 'Secured · Powered by ABA PayWay KHQR'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════ SUCCESS ═══════════════ */}
+        {step === 'success' && (
+          <div className="flex flex-col items-center px-5 py-10 text-center">
+            <div
+              className="mb-5 flex h-20 w-20 items-center justify-center rounded-full"
+              style={{ background: 'radial-gradient(circle,rgba(34,197,94,0.2),rgba(34,197,94,0.04))' }}
+            >
+              <CheckCircle2 size={42} className="text-[#22C55E]" />
+            </div>
+            <p className="flex items-center gap-1.5 text-[16px] font-bold text-white">
+              <Crown size={15} fill="#E8A94A" strokeWidth={0} />
+              {km ? 'អ្នកគឺជាសមាជិក VIP ហើយ!' : t.subYourePremium}
+            </p>
+            <p className="mx-auto mt-2 max-w-[240px] text-[10.5px] leading-relaxed text-white/50">
+              {km ? 'ការទូទាត់ត្រូវបានផ្ទៀងផ្ទាត់ ការទស្សនា VIP ត្រូវបានដោះសោ' : t.subConfirmedDesc}
+            </p>
+            <button
+              onClick={onClose}
+              className="mt-6 rounded-2xl px-8 py-3 text-[13px] font-bold text-white transition hover:brightness-110 active:scale-[0.98]"
+              style={{ background: 'linear-gradient(135deg,#0FAE88 0%,#0A7D62 100%)' }}
+            >
+              {km ? 'ចាប់ផ្ដើមមើល' : t.subStartWatching}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
