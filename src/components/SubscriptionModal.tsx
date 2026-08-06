@@ -45,7 +45,11 @@ const PLAN_QR: Record<PlanKey, string> = {
 
 const KHQR_MERCHANT_NAME = 'PANG SOK HENG S2_Nint.Ani';
 
-const COUNTDOWN_SECONDS = 300;
+// 3-minute wait window shown in the modal. The webhook itself does not
+// enforce this — a late notification can still confirm the request
+// after the on-screen timer runs out — this is just how long we keep
+// the user watching before switching to the "try again" screen.
+const COUNTDOWN_SECONDS = 180;
 const POLL_INTERVAL_MS = 3000;
 
 interface Props {
@@ -271,7 +275,7 @@ export default function SubscriptionModal({ onClose }: Props) {
                   <Clock size={12} className="mt-0.5 shrink-0 text-[#EF4444]" />
                   <p className="text-[11px] leading-relaxed text-[#EF4444]/80">
                     {step === 'failed'
-                      ? (km ? 'ការទូទាត់បរាជ័យ ចំនួនប្រាក់មិនត្រូវគ្នា សូមព្យាយាមម្ដងទៀត' : 'Payment failed — the amount didn\u2019t match. Please try again.')
+                      ? (km ? 'មិនអាចបញ្ជាក់ការទូទាត់នេះបានទេ សូមព្យាយាមម្ដងទៀត' : 'This payment could not be confirmed. Please try again.')
                       : t.subTimeoutDesc}
                   </p>
                 </div>
@@ -435,40 +439,42 @@ export default function SubscriptionModal({ onClose }: Props) {
             <div className="flex flex-col items-center gap-1 px-4 pb-3 text-center">
               <p className="flex items-center gap-1.5 text-[13px] font-bold text-white">
                 <ImageIcon size={14} className="text-[#E8A94A]" />
-                {km ? 'ស្កេន និងរក្សាទុក QR' : 'Scan & Save QR'}
+                {km ? 'ជំហានទី ១ — ស្កេន QR ហើយបង់ចំនួនដែលបង្ហាញ' : 'Step 1 — Scan the QR and pay the exact amount shown'}
               </p>
               <p className="max-w-[280px] text-[12px] leading-relaxed text-white/40">
                 {km
-                  ? 'ស្កេនតាមកម្មវិធីធនាគារ KHQR ណាមួយ ឬថតរក្សាទុក ហើយបើកពីវិចិត្រសាល (gallery) របស់អ្នក'
-                  : 'Scan with any KHQR banking app, or save the QR and upload it from your gallery'}
+                  ? 'ស្កេនតាមកម្មវិធីធនាគារ KHQR ណាមួយ ចំនួនប្រាក់ត្រូវបានកំណត់ស្រាប់ក្នុង QR រួចហើយ មិនអាចកែបានទេ'
+                  : 'Scan with any KHQR banking app — the amount is fixed in the QR itself and can\u2019t be edited'}
               </p>
             </div>
 
-            {/* Match code — OPTIONAL backup, not required for the normal flow.
-                Auto-unlock works off the ABA notification's amount alone
-                (see the "amount + 20-minute window" fallback in
-                telegram-webhook): pay the exact amount shown → ABA posts to
-                the group → bot matches by amount → unlocks. This code only
-                matters if two people happen to pay the exact same plan
-                within the same few minutes — then it's the tie-breaker. */}
+            {/* Match code — this is the ONLY signal the webhook uses to
+                confirm a payment (see telegram-webhook). It's globally
+                unique per request, so it can never be confused with
+                anyone else's payment, even if several people are paying
+                the same plan at the same time. The user must type it
+                into the ABA "Message / Note" field before confirming
+                the transfer. */}
             {matchCode && (
               <div className="px-6 pb-2">
-                <details className="group rounded-xl" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-[11px] font-medium text-white/40">
-                    {km ? 'កូដបម្រុង (មិនចាំបាច់ប្រើ)' : 'Backup code (not required)'}
-                    <span className="text-white/25 transition group-open:rotate-180">⌄</span>
-                  </summary>
-                  <div className="flex items-center justify-between gap-2 px-3 pb-2.5 pt-0.5">
-                    <p className="text-[16px] font-black tracking-[0.15em] text-white/60">{matchCode}</p>
+                <div
+                  className="rounded-xl px-3 py-2.5"
+                  style={{ border: '1px solid rgba(232,169,74,0.25)', background: 'rgba(232,169,74,0.06)' }}
+                >
+                  <p className="text-[11px] font-semibold text-[#E8A94A]">
+                    {km ? 'ជំហានទី ២ — វាយកូដនេះក្នុងប្រអប់ Message / Note' : 'Step 2 — Type this code in the Message / Note field'}
+                  </p>
+                  <div className="mt-1.5 flex items-center justify-between gap-2">
+                    <p className="text-[20px] font-black tracking-[0.2em] text-white">{matchCode}</p>
                     <button
                       onClick={copyMatchCode}
-                      className="shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-semibold transition active:scale-[0.97]"
-                      style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)' }}
+                      className="shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition active:scale-[0.97]"
+                      style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)' }}
                     >
                       {codeCopied ? (km ? 'បានចម្លង!' : 'Copied!') : (km ? 'ចម្លង' : 'Copy')}
                     </button>
                   </div>
-                </details>
+                </div>
               </div>
             )}
 
