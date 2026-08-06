@@ -195,8 +195,42 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!matchedId) {
+      // No exact-amount / code match. If there's exactly one pending
+      // request outstanding right now, this notification is almost
+      // certainly about it — just for a different amount (underpaid,
+      // overpaid, or a stray notification). Flag it 'failed' so the app
+      // (which is polling) can immediately tell the user to retry instead
+      // of silently sitting on "pending" until the on-screen timer runs
+      // out. This is a best-effort heuristic — with more than one
+      // outstanding request we can't tell whose payment this was, so we
+      // deliberately leave those alone.
+      if (amounts.length > 0) {
+        const since = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+        const { data: pendingRows } = await adminClient
+          .from("subscription_requests")
+          .select("id, amount, created_at")
+          .eq("status", "pending")
+          .gte("created_at", since);
+
+        if (pendingRows && pendingRows.length === 1) {
+          const lone = pendingRows[0];
+          console.log(
+            `[MISMATCH] Notification amount(s) [${amounts.join(", ")}] don't match the ` +
+            `lone pending request's amount ($${lone.amount}, id ${lone.id}) — marking failed.`
+          );
+          const { error: failError } = await adminClient
+            .from("subscription_requests")
+            .update({ status: "failed", verified_method: "telegram_amount_mismatch" })
+            .eq("id", lone.id)
+            .eq("status", "pending"); // guard against a race
+          if (failError) console.error("Failed to flag amount mismatch:", failError);
+        } else if (pendingRows && pendingRows.length > 1) {
+          console.log(`[AMBIGUOUS] ${pendingRows.length} pending requests outstanding — can't tell which one this notification is about.`);
+        }
+      }
+
       console.log(
-        `[NO_MATCH] Could not find unambiguous pending request. ` +
+        `[NO_MATCH] Could not find unambiguous pending request to confirm. ` +
         `Codes: [${candidateCodes.join(", ")}], Amounts: [${amounts.join(", ")}]`
       );
       return ack();
