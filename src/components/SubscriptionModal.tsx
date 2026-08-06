@@ -166,8 +166,8 @@ export default function SubscriptionModal({ onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-end justify-center overflow-hidden sm:items-center sm:p-4"
-      style={{ backgroundColor: 'rgba(4,4,10,0.92)', backdropFilter: 'blur(12px)' }}
+      className="fixed inset-0 z-[90] flex items-center justify-center overflow-hidden p-4"
+      style={{ backgroundColor: 'rgba(4,4,10,0.72)', backdropFilter: 'blur(10px)' }}
       onClick={step !== 'qr' ? onClose : undefined}
     >
       {/* Atmospheric silhouette backdrop — large dim watermark + amber glow, no click target */}
@@ -182,27 +182,31 @@ export default function SubscriptionModal({ onClose }: Props) {
           className="absolute left-1/2 top-1/2 h-[70vh] w-[70vh] -translate-x-1/2 -translate-y-1/2 rounded-full"
           style={{ background: 'radial-gradient(circle,rgba(232,169,74,0.10) 0%,rgba(232,169,74,0) 65%)' }}
         />
+        {/* Vignette shadow — darkens the edges so the centered card reads with depth,
+            instead of a flat opaque wash covering the whole screen */}
         <div
           className="absolute inset-0"
-          style={{ background: 'radial-gradient(ellipse at 50% 100%,rgba(0,0,0,0.5) 0%,rgba(0,0,0,0) 55%)' }}
+          style={{ background: 'radial-gradient(ellipse at 50% 50%,rgba(0,0,0,0) 35%,rgba(0,0,0,0.55) 100%)' }}
         />
       </div>
 
       <div
-        className="relative w-full overflow-hidden text-white"
+        className="relative w-full overflow-y-auto text-white"
         style={{
           maxWidth: 372,
+          maxHeight: '92vh',
           background: 'linear-gradient(175deg,#1c1a2b 0%,#0c0b14 100%)',
           border: '1px solid rgba(232,169,74,0.14)',
           borderRadius: 28,
-          boxShadow: '0 -8px 40px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.03), 0 30px 80px -20px rgba(232,169,74,0.15)',
+          boxShadow: '0 24px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.03), 0 30px 80px -20px rgba(232,169,74,0.15)',
+          scrollbarWidth: 'none',
         }}
         onClick={(e) => e.stopPropagation()}
       >
 
         {/* ═══════════════ PLAN SELECTION ═══════════════ */}
         {(step === 'summary' || step === 'timeout') && (
-          <div className="flex max-h-[92vh] flex-col overflow-hidden">
+          <div className="flex flex-col">
             {/* Header */}
             <div className="relative px-4 pb-2 pt-5 text-center">
               <button
@@ -223,18 +227,18 @@ export default function SubscriptionModal({ onClose }: Props) {
                 />
               </div>
 
-              <h2 className="flex items-center justify-center gap-1.5 text-[18px] font-extrabold tracking-tight text-white">
+              <h2 className="flex items-center justify-center gap-1.5 text-[20px] font-extrabold tracking-tight text-white">
                 <Crown size={17} fill="#E8A94A" strokeWidth={0} />
                 {km ? 'ក្លាយជាសមាជិក VIP' : t.subGoPremium}
               </h2>
-              <p className="mt-1 flex items-center justify-center gap-1.5 text-[10.5px] font-medium text-white/40">
+              <p className="mt-1 flex items-center justify-center gap-1.5 text-[11px] font-medium text-white/40">
                 <Sparkles size={9} className="text-[#E8A94A]" />
                 {km ? 'មើលគ្មានដែនកំណត់ · គ្មានពាណិជ្ជកម្ម · ដោះសោភ្លាមៗ' : t.subTagline}
               </p>
             </div>
 
             {/* Scrollable body */}
-            <div className="overflow-y-auto px-3.5 pb-4 pt-2" style={{ scrollbarWidth: 'none' }}>
+            <div className="px-3.5 pb-4 pt-2">
 
               {/* Timeout notice */}
               {step === 'timeout' && (
@@ -268,7 +272,7 @@ export default function SubscriptionModal({ onClose }: Props) {
                       {/* Badge — centered top edge */}
                       {p.tagKey && (
                         <span
-                          className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 top-0 inline-flex items-center gap-0.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-black"
+                          className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 top-0 inline-flex items-center gap-0.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-black"
                           style={{ background: 'linear-gradient(90deg,#E8A94A,#D4821E)' }}
                         >
                           <Sparkles size={6} />
@@ -278,12 +282,12 @@ export default function SubscriptionModal({ onClose }: Props) {
 
                       <p className="text-[10px] font-medium text-white/40">{planLabel(p)}</p>
                       <p
-                        className="mt-0.5 text-[30px] font-black leading-none tracking-tight"
+                        className="mt-0.5 text-[28px] font-black leading-none tracking-tight"
                         style={{ color: isSel ? '#E8A94A' : '#3FAE8A' }}
                       >
                         ${p.price}
                       </p>
-                      <p className="mt-1 text-[9px] text-white/30">
+                      <p className="mt-1 text-[10px] text-white/30">
                         ${(p.price / p.months).toFixed(2)}/{km ? 'ខែ' : 'mo'}
                       </p>
                     </button>
@@ -309,9 +313,9 @@ export default function SubscriptionModal({ onClose }: Props) {
                   <p className="text-[11px] font-semibold text-white/70">
                     {km ? 'សរុបប្រើប្រាស់' : 'Total due'}
                   </p>
-                  <p className="text-[9.5px] text-white/35">{planLabel(selectedPlan)}</p>
+                  <p className="text-[10px] text-white/35">{planLabel(selectedPlan)}</p>
                 </div>
-                <p className="text-[26px] font-black text-white leading-none">
+                <p className="text-[28px] font-black text-white leading-none">
                   ${selectedPlan.price}
                 </p>
               </div>
@@ -328,7 +332,7 @@ export default function SubscriptionModal({ onClose }: Props) {
                   <QrCode size={12} className="text-[#3FAE8A]" />
                   {km ? 'ស្វែងតាមមជ្ឈមណ្ឌលធនាគារតាមបស់ម្ចូរជើឡូច្ចាត់' : 'Scan to pay via KHQR banking app'}
                 </p>
-                <p className="mt-1 text-[9.5px] leading-relaxed text-white/35">
+                <p className="mt-1 text-[10px] leading-relaxed text-white/35">
                   {km
                     ? 'ស្វែង QR តាមមជ្ឈមណ្ឌល យកចំណូលជូន ចូលប្រើ ABA Mobile ឬ App ធនាគារណាដែលគាំទ្រ KHQR — ប្រព័ន្ធនឹងបើសសិទ្ធិ VIP ដោយស្វ័យប្រវត្តិ'
                     : 'Scan QR with ABA Mobile or any KHQR-supported banking app — VIP access unlocks automatically'}
@@ -336,14 +340,14 @@ export default function SubscriptionModal({ onClose }: Props) {
               </div>
 
               {error && (
-                <p className="mt-2 rounded-xl bg-[#EF4444]/10 px-3 py-2 text-[10.5px] text-[#EF4444]">{error}</p>
+                <p className="mt-2 rounded-xl bg-[#EF4444]/10 px-3 py-2 text-[11px] text-[#EF4444]">{error}</p>
               )}
 
               {/* Pay button */}
               <button
                 onClick={() => doCreateRequest(step === 'timeout')}
                 disabled={paying}
-                className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-[14px] font-bold text-white transition hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
+                className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-[13px] font-bold text-white transition hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
                 style={{ background: 'linear-gradient(135deg,#0FAE88 0%,#0A7D62 100%)' }}
               >
                 {paying ? (
@@ -358,7 +362,7 @@ export default function SubscriptionModal({ onClose }: Props) {
             {/* Footer */}
             <div className="flex items-center justify-center gap-1.5 border-t border-white/[0.04] py-2.5">
               <ShieldCheck size={9} className="text-white/25" />
-              <p className="text-[8.5px] text-white/25">
+              <p className="text-[10px] text-white/25">
                 {km ? 'ការទូទាត់មានសុវត្ថិភាព · ដំណើរការដោយ ABA PayWay KHQR' : t.subSecFooter ?? 'Secured checkout · Powered by ABA PayWay KHQR'}
               </p>
             </div>
@@ -401,11 +405,11 @@ export default function SubscriptionModal({ onClose }: Props) {
 
             {/* Scan instruction */}
             <div className="flex flex-col items-center gap-1 px-4 pb-3 text-center">
-              <p className="flex items-center gap-1.5 text-[14px] font-bold text-white">
+              <p className="flex items-center gap-1.5 text-[13px] font-bold text-white">
                 <ImageIcon size={14} className="text-[#E8A94A]" />
                 {km ? 'ស្កេន និងរក្សាទុក QR' : 'Scan & Save QR'}
               </p>
-              <p className="max-w-[280px] text-[10.5px] leading-relaxed text-white/40">
+              <p className="max-w-[280px] text-[11px] leading-relaxed text-white/40">
                 {km
                   ? 'ស្កេនតាមកម្មវិធីធនាគារ KHQR ណាមួយ ឬថតរក្សាទុក ហើយបើកពីវិចិត្រសាល (gallery) របស់អ្នក'
                   : 'Scan with any KHQR banking app, or save the QR and upload it from your gallery'}
@@ -431,7 +435,7 @@ export default function SubscriptionModal({ onClose }: Props) {
                 {qrFailed ? (
                   <div className="flex aspect-[3/4] flex-col items-center justify-center bg-gray-50 text-center">
                     <QrCode size={36} className="mx-auto mb-1.5 text-gray-300" />
-                    <p className="text-[9px] text-gray-400">
+                    <p className="text-[10px] text-gray-400">
                       {km ? 'មិនអាចផ្ទុក QR បានទេ' : 'QR not available'}
                     </p>
                   </div>
@@ -452,7 +456,7 @@ export default function SubscriptionModal({ onClose }: Props) {
             <div className="px-4 pb-2 pt-0.5">
               <button
                 onClick={saveQr}
-                className="mx-auto flex items-center justify-center gap-1.5 rounded-full px-5 py-2.5 text-[11.5px] font-semibold transition hover:brightness-110 active:scale-[0.98]"
+                className="mx-auto flex items-center justify-center gap-1.5 rounded-full px-5 py-2.5 text-[12px] font-semibold transition hover:brightness-110 active:scale-[0.98]"
                 style={{
                   border: '1.5px solid rgba(232,169,74,0.25)',
                   background: 'rgba(232,169,74,0.08)',
@@ -484,7 +488,7 @@ export default function SubscriptionModal({ onClose }: Props) {
                   <p className="text-[11px] font-semibold text-white/80">
                     {km ? 'កំពុងរង់ចាំការទូទាត់…' : 'Waiting for payment…'}
                   </p>
-                  <p className="text-[9px] text-white/40">
+                  <p className="text-[10px] text-white/40">
                     {km ? 'ដោះសោ VIP ស្វ័យប្រវត្តិពេល ABA បញ្ជាក់' : 'Auto-unlocks when ABA confirms'}
                   </p>
                 </div>
@@ -494,7 +498,7 @@ export default function SubscriptionModal({ onClose }: Props) {
             {/* Footer */}
             <div className="flex items-center justify-center gap-1.5 border-t border-white/[0.04] py-2.5">
               <ShieldCheck size={9} className="text-white/25" />
-              <p className="text-[8.5px] text-white/25">
+              <p className="text-[10px] text-white/25">
                 {km ? 'ការទូទាត់មានសុវត្ថិភាព · ដំណើរការដោយ ABA PayWay KHQR' : t.subSecFooter ?? 'Secured · Powered by ABA PayWay KHQR'}
               </p>
             </div>
@@ -514,7 +518,7 @@ export default function SubscriptionModal({ onClose }: Props) {
               <Crown size={15} fill="#E8A94A" strokeWidth={0} />
               {km ? 'អ្នកគឺជាសមាជិក VIP ហើយ!' : t.subYourePremium}
             </p>
-            <p className="mx-auto mt-2 max-w-[240px] text-[10.5px] leading-relaxed text-white/50">
+            <p className="mx-auto mt-2 max-w-[240px] text-[11px] leading-relaxed text-white/50">
               {km ? 'ការទូទាត់ត្រូវបានផ្ទៀងផ្ទាត់ ការទស្សនា VIP ត្រូវបានដោះសោ' : t.subConfirmedDesc}
             </p>
             <button
