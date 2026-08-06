@@ -45,14 +45,14 @@ const PLAN_QR: Record<PlanKey, string> = {
 
 const KHQR_MERCHANT_NAME = 'PANG SOK HENG S2_Nint.Ani';
 
-const COUNTDOWN_SECONDS = 120;
+const COUNTDOWN_SECONDS = 300;
 const POLL_INTERVAL_MS = 3000;
 
 interface Props {
   onClose: () => void;
 }
 
-type Step = 'summary' | 'qr' | 'success' | 'timeout';
+type Step = 'summary' | 'qr' | 'success' | 'timeout' | 'failed';
 
 export default function SubscriptionModal({ onClose }: Props) {
   const { lang } = useLang();
@@ -67,6 +67,8 @@ export default function SubscriptionModal({ onClose }: Props) {
   const [qrLoaded, setQrLoaded] = useState(false);
   const [qrFailed, setQrFailed] = useState(false);
   const [qrSaved, setQrSaved] = useState(false);
+  const [matchCode, setMatchCode] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -109,10 +111,24 @@ export default function SubscriptionModal({ onClose }: Props) {
     }
   };
 
-  const startListening = (requestId: string) => {
+  const copyMatchCode = async () => {
+    if (!matchCode) return;
+    try {
+      await navigator.clipboard.writeText(matchCode);
+    } catch {
+      // Clipboard API unavailable — the code is still shown on screen
+      // for the user to type manually.
+    }
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
+  };
+
+  const startListening = (requestId: string, code: string | null) => {
     setSecondsLeft(COUNTDOWN_SECONDS);
     setStep('qr');
     setQrSaved(false);
+    setCodeCopied(false);
+    setMatchCode(code);
     let remaining = COUNTDOWN_SECONDS;
     stopTimers();
     countdownRef.current = setInterval(() => {
@@ -127,6 +143,7 @@ export default function SubscriptionModal({ onClose }: Props) {
         .eq('id', requestId)
         .maybeSingle();
       if (data?.status === 'confirmed') { stopTimers(); setStep('success'); }
+      else if (data?.status === 'failed') { stopTimers(); setStep('failed'); }
     }, POLL_INTERVAL_MS);
   };
 
@@ -145,10 +162,10 @@ export default function SubscriptionModal({ onClose }: Props) {
           discount: 0,
           description: isRetry ? 'Awaiting Telegram auto-confirm (retry)' : 'Awaiting Telegram auto-confirm',
         })
-        .select('id')
+        .select('id, match_code')
         .single();
       if (insertError || !data) { setError(insertError?.message || t.subQrGenericError); return; }
-      startListening(data.id);
+      startListening(data.id, (data as { match_code?: string | null }).match_code ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : t.subQrGenericError);
     } finally {
@@ -200,12 +217,17 @@ export default function SubscriptionModal({ onClose }: Props) {
           borderRadius: 28,
           boxShadow: '0 24px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.03), 0 30px 80px -20px rgba(232,169,74,0.15)',
           scrollbarWidth: 'none',
+          // Khmer script stacks vowels/subscripts above & below the base
+          // consonant — the default ~1.15 line-height clips them at small
+          // sizes. 1.55 gives them room without visibly loosening the
+          // Latin/number-only lines (those already pin leading-none).
+          lineHeight: 1.55,
         }}
         onClick={(e) => e.stopPropagation()}
       >
 
         {/* ═══════════════ PLAN SELECTION ═══════════════ */}
-        {(step === 'summary' || step === 'timeout') && (
+        {(step === 'summary' || step === 'timeout' || step === 'failed') && (
           <div className="flex flex-col">
             {/* Header */}
             <div className="relative px-4 pb-2 pt-5 text-center">
@@ -227,11 +249,11 @@ export default function SubscriptionModal({ onClose }: Props) {
                 />
               </div>
 
-              <h2 className="flex items-center justify-center gap-1.5 text-[20px] font-extrabold tracking-tight text-white">
+              <h2 className="flex items-center justify-center gap-1.5 text-[20px] font-extrabold text-white">
                 <Crown size={17} fill="#E8A94A" strokeWidth={0} />
                 {km ? 'ក្លាយជាសមាជិក VIP' : t.subGoPremium}
               </h2>
-              <p className="mt-1 flex items-center justify-center gap-1.5 text-[11px] font-medium text-white/40">
+              <p className="mt-1 flex items-center justify-center gap-1.5 text-[12px] font-medium text-white/40">
                 <Sparkles size={9} className="text-[#E8A94A]" />
                 {km ? 'មើលគ្មានដែនកំណត់ · គ្មានពាណិជ្ជកម្ម · ដោះសោភ្លាមៗ' : t.subTagline}
               </p>
@@ -240,14 +262,18 @@ export default function SubscriptionModal({ onClose }: Props) {
             {/* Scrollable body */}
             <div className="px-3.5 pb-4 pt-2">
 
-              {/* Timeout notice */}
-              {step === 'timeout' && (
+              {/* Timeout / failed notice */}
+              {(step === 'timeout' || step === 'failed') && (
                 <div
                   className="mb-3 flex items-start gap-2 rounded-xl px-3 py-2.5"
                   style={{ border: '1px solid rgba(239,68,68,0.2)', background: 'rgba(239,68,68,0.07)' }}
                 >
                   <Clock size={12} className="mt-0.5 shrink-0 text-[#EF4444]" />
-                  <p className="text-[10px] leading-relaxed text-[#EF4444]/80">{t.subTimeoutDesc}</p>
+                  <p className="text-[11px] leading-relaxed text-[#EF4444]/80">
+                    {step === 'failed'
+                      ? (km ? 'ការទូទាត់បរាជ័យ ចំនួនប្រាក់មិនត្រូវគ្នា សូមព្យាយាមម្ដងទៀត' : 'Payment failed — the amount didn\u2019t match. Please try again.')
+                      : t.subTimeoutDesc}
+                  </p>
                 </div>
               )}
 
@@ -272,7 +298,7 @@ export default function SubscriptionModal({ onClose }: Props) {
                       {/* Badge — centered top edge */}
                       {p.tagKey && (
                         <span
-                          className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 top-0 inline-flex items-center gap-0.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-black"
+                          className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 top-0 inline-flex items-center gap-0.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-black uppercase tracking-wider text-black"
                           style={{ background: 'linear-gradient(90deg,#E8A94A,#D4821E)' }}
                         >
                           <Sparkles size={6} />
@@ -280,14 +306,14 @@ export default function SubscriptionModal({ onClose }: Props) {
                         </span>
                       )}
 
-                      <p className="text-[10px] font-medium text-white/40">{planLabel(p)}</p>
+                      <p className="text-[11px] font-medium text-white/40">{planLabel(p)}</p>
                       <p
                         className="mt-0.5 text-[28px] font-black leading-none tracking-tight"
                         style={{ color: isSel ? '#E8A94A' : '#3FAE8A' }}
                       >
                         ${p.price}
                       </p>
-                      <p className="mt-1 text-[10px] text-white/30">
+                      <p className="mt-1 text-[11px] text-white/30">
                         ${(p.price / p.months).toFixed(2)}/{km ? 'ខែ' : 'mo'}
                       </p>
                     </button>
@@ -310,10 +336,10 @@ export default function SubscriptionModal({ onClose }: Props) {
                   <DollarSign size={16} className="text-white" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[11px] font-semibold text-white/70">
+                  <p className="text-[12px] font-semibold text-white/70">
                     {km ? 'សរុបប្រើប្រាស់' : 'Total due'}
                   </p>
-                  <p className="text-[10px] text-white/35">{planLabel(selectedPlan)}</p>
+                  <p className="text-[11px] text-white/35">{planLabel(selectedPlan)}</p>
                 </div>
                 <p className="text-[28px] font-black text-white leading-none">
                   ${selectedPlan.price}
@@ -328,11 +354,11 @@ export default function SubscriptionModal({ onClose }: Props) {
                   background: 'rgba(255,255,255,0.025)',
                 }}
               >
-                <p className="flex items-center gap-1.5 text-[11px] font-semibold text-white/70">
+                <p className="flex items-center gap-1.5 text-[12px] font-semibold text-white/70">
                   <QrCode size={12} className="text-[#3FAE8A]" />
                   {km ? 'ស្វែងតាមមជ្ឈមណ្ឌលធនាគារតាមបស់ម្ចូរជើឡូច្ចាត់' : 'Scan to pay via KHQR banking app'}
                 </p>
-                <p className="mt-1 text-[10px] leading-relaxed text-white/35">
+                <p className="mt-1 text-[11px] leading-relaxed text-white/35">
                   {km
                     ? 'ស្វែង QR តាមមជ្ឈមណ្ឌល យកចំណូលជូន ចូលប្រើ ABA Mobile ឬ App ធនាគារណាដែលគាំទ្រ KHQR — ប្រព័ន្ធនឹងបើសសិទ្ធិ VIP ដោយស្វ័យប្រវត្តិ'
                     : 'Scan QR with ABA Mobile or any KHQR-supported banking app — VIP access unlocks automatically'}
@@ -340,12 +366,12 @@ export default function SubscriptionModal({ onClose }: Props) {
               </div>
 
               {error && (
-                <p className="mt-2 rounded-xl bg-[#EF4444]/10 px-3 py-2 text-[11px] text-[#EF4444]">{error}</p>
+                <p className="mt-2 rounded-xl bg-[#EF4444]/10 px-3 py-2 text-[12px] text-[#EF4444]">{error}</p>
               )}
 
               {/* Pay button */}
               <button
-                onClick={() => doCreateRequest(step === 'timeout')}
+                onClick={() => doCreateRequest(step === 'timeout' || step === 'failed')}
                 disabled={paying}
                 className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-[13px] font-bold text-white transition hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
                 style={{ background: 'linear-gradient(135deg,#0FAE88 0%,#0A7D62 100%)' }}
@@ -355,14 +381,16 @@ export default function SubscriptionModal({ onClose }: Props) {
                 ) : (
                   <DollarSign size={16} />
                 )}
-                {km ? (step === 'timeout' ? 'ចាប់ផ្ដើមម្ដងទៀត' : 'ទូទាត់') : (step === 'timeout' ? 'Try Again' : 'Pay Now')}
+                {km
+                  ? (step === 'timeout' || step === 'failed' ? 'ចាប់ផ្ដើមម្ដងទៀត' : 'ទូទាត់')
+                  : (step === 'timeout' || step === 'failed' ? 'Try Again' : 'Pay Now')}
               </button>
             </div>
 
             {/* Footer */}
             <div className="flex items-center justify-center gap-1.5 border-t border-white/[0.04] py-2.5">
               <ShieldCheck size={9} className="text-white/25" />
-              <p className="text-[10px] text-white/25">
+              <p className="text-[11px] text-white/25">
                 {km ? 'ការទូទាត់មានសុវត្ថិភាព · ដំណើរការដោយ ABA PayWay KHQR' : t.subSecFooter ?? 'Secured checkout · Powered by ABA PayWay KHQR'}
               </p>
             </div>
@@ -376,7 +404,7 @@ export default function SubscriptionModal({ onClose }: Props) {
             <div className="flex items-center justify-between px-3.5 pb-2 pt-4">
               <button
                 onClick={() => { stopTimers(); setStep('summary'); }}
-                className="flex items-center gap-1 rounded-xl px-3 py-1.5 text-[11px] font-medium text-white/60 transition hover:bg-white/08 hover:text-white"
+                className="flex items-center gap-1 rounded-xl px-3 py-1.5 text-[12px] font-medium text-white/60 transition hover:bg-white/08 hover:text-white"
                 style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)' }}
               >
                 <ArrowLeft size={13} />
@@ -409,12 +437,40 @@ export default function SubscriptionModal({ onClose }: Props) {
                 <ImageIcon size={14} className="text-[#E8A94A]" />
                 {km ? 'ស្កេន និងរក្សាទុក QR' : 'Scan & Save QR'}
               </p>
-              <p className="max-w-[280px] text-[11px] leading-relaxed text-white/40">
+              <p className="max-w-[280px] text-[12px] leading-relaxed text-white/40">
                 {km
                   ? 'ស្កេនតាមកម្មវិធីធនាគារ KHQR ណាមួយ ឬថតរក្សាទុក ហើយបើកពីវិចិត្រសាល (gallery) របស់អ្នក'
                   : 'Scan with any KHQR banking app, or save the QR and upload it from your gallery'}
               </p>
             </div>
+
+            {/* Match code — OPTIONAL backup, not required for the normal flow.
+                Auto-unlock works off the ABA notification's amount alone
+                (see the "amount + 20-minute window" fallback in
+                telegram-webhook): pay the exact amount shown → ABA posts to
+                the group → bot matches by amount → unlocks. This code only
+                matters if two people happen to pay the exact same plan
+                within the same few minutes — then it's the tie-breaker. */}
+            {matchCode && (
+              <div className="px-6 pb-2">
+                <details className="group rounded-xl" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-[11px] font-medium text-white/40">
+                    {km ? 'កូដបម្រុង (មិនចាំបាច់ប្រើ)' : 'Backup code (not required)'}
+                    <span className="text-white/25 transition group-open:rotate-180">⌄</span>
+                  </summary>
+                  <div className="flex items-center justify-between gap-2 px-3 pb-2.5 pt-0.5">
+                    <p className="text-[16px] font-black tracking-[0.15em] text-white/60">{matchCode}</p>
+                    <button
+                      onClick={copyMatchCode}
+                      className="shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-semibold transition active:scale-[0.97]"
+                      style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)' }}
+                    >
+                      {codeCopied ? (km ? 'បានចម្លង!' : 'Copied!') : (km ? 'ចម្លង' : 'Copy')}
+                    </button>
+                  </div>
+                </details>
+              </div>
+            )}
 
             {/* KHQR card — the PNG already contains the header, merchant name, amount & QR,
                 so we just frame the image itself, small and clean (no duplicate text) */}
@@ -435,7 +491,7 @@ export default function SubscriptionModal({ onClose }: Props) {
                 {qrFailed ? (
                   <div className="flex aspect-[3/4] flex-col items-center justify-center bg-gray-50 text-center">
                     <QrCode size={36} className="mx-auto mb-1.5 text-gray-300" />
-                    <p className="text-[10px] text-gray-400">
+                    <p className="text-[11px] text-gray-400">
                       {km ? 'មិនអាចផ្ទុក QR បានទេ' : 'QR not available'}
                     </p>
                   </div>
@@ -485,10 +541,10 @@ export default function SubscriptionModal({ onClose }: Props) {
                   <Loader2 size={13} className="animate-spin text-[#14C79A]" />
                 </div>
                 <div>
-                  <p className="text-[11px] font-semibold text-white/80">
+                  <p className="text-[12px] font-semibold text-white/80">
                     {km ? 'កំពុងរង់ចាំការទូទាត់…' : 'Waiting for payment…'}
                   </p>
-                  <p className="text-[10px] text-white/40">
+                  <p className="text-[11px] text-white/40">
                     {km ? 'ដោះសោ VIP ស្វ័យប្រវត្តិពេល ABA បញ្ជាក់' : 'Auto-unlocks when ABA confirms'}
                   </p>
                 </div>
@@ -498,7 +554,7 @@ export default function SubscriptionModal({ onClose }: Props) {
             {/* Footer */}
             <div className="flex items-center justify-center gap-1.5 border-t border-white/[0.04] py-2.5">
               <ShieldCheck size={9} className="text-white/25" />
-              <p className="text-[10px] text-white/25">
+              <p className="text-[11px] text-white/25">
                 {km ? 'ការទូទាត់មានសុវត្ថិភាព · ដំណើរការដោយ ABA PayWay KHQR' : t.subSecFooter ?? 'Secured · Powered by ABA PayWay KHQR'}
               </p>
             </div>
@@ -518,7 +574,7 @@ export default function SubscriptionModal({ onClose }: Props) {
               <Crown size={15} fill="#E8A94A" strokeWidth={0} />
               {km ? 'អ្នកគឺជាសមាជិក VIP ហើយ!' : t.subYourePremium}
             </p>
-            <p className="mx-auto mt-2 max-w-[240px] text-[11px] leading-relaxed text-white/50">
+            <p className="mx-auto mt-2 max-w-[240px] text-[12px] leading-relaxed text-white/50">
               {km ? 'ការទូទាត់ត្រូវបានផ្ទៀងផ្ទាត់ ការទស្សនា VIP ត្រូវបានដោះសោ' : t.subConfirmedDesc}
             </p>
             <button
