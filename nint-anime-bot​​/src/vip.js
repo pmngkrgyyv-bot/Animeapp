@@ -115,6 +115,41 @@ async function getPlaybackUrl(videoUrlColumn) {
   return { url: data.signedUrl, signed: true };
 }
 
+/**
+ * ផែនការ VIP — ត្រូវនឹងតម្លៃដូចគ្នានឹង App (SubscriptionModal.tsx)
+ */
+const PLANS = {
+  '1m': { months: 1, price: 2, label: '១ ខែ — $2' },
+  '2m': { months: 2, price: 4, label: '២ ខែ — $4' },
+  '6m': { months: 6, price: 7, label: '៦ ខែ — $7' },
+  '1y': { months: 12, price: 28, label: '១២ ខែ — $28' },
+};
+
+/**
+ * បង្កើត Subscription Request ដូចគ្នានឹងអ្វីដែល App ធ្វើ (doCreateRequest)
+ * ត្រូវការ chatId ដើម្បីឲ្យ Bot ដឹងកន្លែងផ្ញើសារជូនដំណឹងពេលទូទាត់ត្រូវបានបញ្ជាក់
+ */
+async function createSubscriptionRequest(appUserId, planKey, chatId) {
+  const plan = PLANS[planKey];
+  if (!plan) return { ok: false, reason: 'invalid_plan' };
+
+  const { data, error } = await supabase
+    .from('subscription_requests')
+    .insert({
+      user_id: appUserId,
+      plan: planKey,
+      amount: plan.price,
+      discount: 0,
+      description: 'Awaiting Telegram Bot auto-confirm',
+      notify_chat_id: String(chatId),
+    })
+    .select('id, match_code')
+    .single();
+
+  if (error || !data) return { ok: false, reason: error?.message };
+  return { ok: true, id: data.id, matchCode: data.match_code, amount: plan.price };
+}
+
 module.exports = {
   linkAccount,
   getLinkedAppUser,
@@ -122,4 +157,6 @@ module.exports = {
   isSubscriptionActive,
   canWatchEpisode,
   getPlaybackUrl,
+  PLANS,
+  createSubscriptionRequest,
 };
