@@ -28,16 +28,21 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, X-Telegram-Bot-Api-Secret-Token",
 };
 
-// Matches "$2.00", "USD 2", "2.00$", "7$", "$0.01", etc.
-// More flexible: optional $ or USD before/after the number
-const AMOUNT_PATTERN = /\$?\s*(\d+(?:\.\d{1,2})?)\s*\$?|USD\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*USD/gi;
+// Matches "$2.00", "USD 2", "2.00$", "7$", "$0.01", etc. — the $ or USD
+// marker is REQUIRED on at least one side, so we never pick up a stray
+// plain number (phone digits, "6 characters", a timestamp) from the group
+// chat and mistake it for a payment amount.
+const AMOUNT_PATTERN = /\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*\$|USD\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*USD/gi;
 
 // A match_code is 6 uppercase letters/digits (see generate_match_code()).
 const CODE_PATTERN = /\b([A-Z0-9]{6})\b/g;
 
 /**
  * Extract all numerical amounts from text and return them sorted.
- * Filters out amounts that are clearly not subscription prices (< 0.50 or > 100).
+ * Filters out amounts that are clearly not real payments (< 0.01 or > 100).
+ * The lower bound used to be 0.50, which silently swallowed small test
+ * transfers (e.g. $0.01) — now that the pattern above requires an
+ * explicit $/USD marker, a low floor is safe.
  */
 function extractAmounts(text: string): number[] {
   const amounts = new Set<number>();
@@ -45,12 +50,11 @@ function extractAmounts(text: string): number[] {
   
   AMOUNT_PATTERN.lastIndex = 0;
   while ((m = AMOUNT_PATTERN.exec(text)) !== null) {
-    const raw = m[1] ?? m[2] ?? m[3];
+    const raw = m[1] ?? m[2] ?? m[3] ?? m[4];
     if (!raw) continue;
     
     const n = parseFloat(raw);
-    // Filter out unrealistic amounts for subscription: keep 0.5 - 100
-    if (Number.isFinite(n) && n >= 0.5 && n <= 100) {
+    if (Number.isFinite(n) && n >= 0.01 && n <= 100) {
       amounts.add(n);
     }
   }
