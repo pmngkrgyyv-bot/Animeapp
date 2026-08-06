@@ -44,6 +44,37 @@ export type Tab = 'home' | 'search' | 'watchlist' | 'account';
 
 const HERO_AUTO_MS = 5500;
 
+// Small, purely-cosmetic emoji lookup for genre rail headers — gives each
+// row a bit of personality at a glance without needing extra icon assets.
+// Falls back to a generic clapperboard for anything unmapped.
+const GENRE_EMOJI: Record<string, string> = {
+  action: '⚔️',
+  adventure: '🧭',
+  comedy: '😂',
+  drama: '🎭',
+  fantasy: '🧙',
+  horror: '👻',
+  mystery: '🔍',
+  romance: '💕',
+  'sci-fi': '🚀',
+  scifi: '🚀',
+  'slice-of-life': '🍃',
+  sliceoflife: '🍃',
+  sports: '⚽',
+  supernatural: '🌙',
+  thriller: '🔪',
+  psychological: '🧠',
+  mecha: '🤖',
+  isekai: '🌀',
+  magic: '✨',
+  school: '🎒',
+  music: '🎵',
+  historical: '🏯',
+  martial_arts: '🥋',
+  'martial-arts': '🥋',
+};
+const genreEmoji = (slug: string) => GENRE_EMOJI[slug.toLowerCase()] ?? '🎬';
+
 export default function HomeScreen({
   onSelectShow,
   onOpenProfile,
@@ -429,6 +460,7 @@ export default function HomeScreen({
               return (
                 <RailRow
                   key={g.id}
+                  emoji={genreEmoji(g.slug)}
                   title={g.name}
                   shows={list}
                   onSelectShow={onSelectShow}
@@ -545,6 +577,9 @@ export default function HomeScreen({
 type TranslationText = {
   featured: string;
   play: string;
+  movie: string;
+  series: string;
+  freeBadge: string;
 };
 
 interface CoverflowHeroProps {
@@ -699,7 +734,14 @@ function CoverflowHero({
                 🔥 #{index + 1}
               </span>
             </div>
-            {/* Title + rating */}
+            {/* Free-to-watch ribbon — opposite corner from Featured, only
+                when this title doesn't require a subscription */}
+            {hero.is_free && (
+              <span className="absolute right-2.5 top-2.5 flex items-center gap-1 rounded-md bg-[#22C55E]/90 px-2 py-[3px] text-[10px] font-bold uppercase tracking-wider text-black shadow-lg backdrop-blur-sm">
+                🔓 {t.freeBadge}
+              </span>
+            )}
+            {/* Title + rating + quick meta */}
             <div className="absolute inset-x-0 bottom-0 px-3 pb-3 text-center">
               <h2
                 className="truncate text-base font-black leading-tight text-white sm:text-lg"
@@ -707,8 +749,14 @@ function CoverflowHero({
               >
                 {hero.title.toUpperCase()}
               </h2>
-              <div className="mt-0.5 flex items-center justify-center gap-1 text-xs font-semibold text-[#E8A94A]">
-                <Star className="h-3 w-3 fill-[#E8A94A]" /> {Number(hero.rating).toFixed(1)}
+              <div className="mt-1 flex items-center justify-center gap-2 text-xs font-semibold">
+                <span className="flex items-center gap-1 text-[#E8A94A]">
+                  <Star className="h-3 w-3 fill-[#E8A94A]" /> {Number(hero.rating).toFixed(1)}
+                </span>
+                <span className="h-3 w-px bg-white/20" aria-hidden />
+                <span className="flex items-center gap-1 text-white/60">
+                  {hero.type === 'movie' ? '🎬' : '📺'} {hero.release_year ?? '—'}
+                </span>
               </div>
             </div>
           </div>
@@ -841,13 +889,16 @@ function BottomTab({ icon, label, active, onClick }: BottomTabProps) {
 interface RailRowProps {
   title: string;
   icon?: React.ReactNode;
+  /** Optional decorative emoji shown instead of a lucide icon — used for
+   *  genre rows so each one reads with a bit of its own personality. */
+  emoji?: string;
   shows: Show[];
   onSelectShow: (s: Show) => void;
   onViewAll?: () => void;
   viewAllLabel?: string;
 }
 
-function RailRow({ title, icon, shows, onSelectShow, onViewAll, viewAllLabel }: RailRowProps) {
+function RailRow({ title, icon, emoji, shows, onSelectShow, onViewAll, viewAllLabel }: RailRowProps) {
   const scrollerRef = useCallback((node: HTMLDivElement | null) => {
     if (node) node.scrollLeft = 0;
   }, []);
@@ -856,8 +907,11 @@ function RailRow({ title, icon, shows, onSelectShow, onViewAll, viewAllLabel }: 
     <section className="mt-10">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          {icon}
+          {icon ?? (emoji && <span className="text-base leading-none">{emoji}</span>)}
           <h2 className="text-lg font-bold tracking-tight">{title}</h2>
+          <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-semibold text-white/35">
+            {shows.length}
+          </span>
         </div>
         {onViewAll && (
           <button

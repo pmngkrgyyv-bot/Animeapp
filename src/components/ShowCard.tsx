@@ -43,6 +43,12 @@ export default function ShowCard({ show, onClick }: ShowCardProps) {
           <Star className="h-3 w-3 fill-[#E8A94A] text-[#E8A94A]" />
           {Number(show.rating).toFixed(1)}
         </div>
+        {/* Free-to-watch ribbon — top-left, only for titles that don't need VIP */}
+        {show.is_free && (
+          <div className="absolute left-2 top-2 flex items-center gap-0.5 rounded-md bg-[#22C55E]/90 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-black">
+            🔓 {t.freeBadge}
+          </div>
+        )}
         {/* Hover play overlay */}
         <div className="absolute inset-0 flex items-center justify-center opacity-0 transition duration-300 group-hover:opacity-100">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#0F8F72] shadow-[0_0_24px_rgba(15,143,114,0.6)]">
@@ -54,8 +60,9 @@ export default function ShowCard({ show, onClick }: ShowCardProps) {
         <h3 className="truncate text-sm font-semibold text-white transition group-hover:text-[#0F8F72]">
           {show.title}
         </h3>
-        <p className="mt-0.5 text-xs text-white/50">
-          {show.release_year ?? '—'} · {show.type === 'movie' ? t.movie : t.series}
+        <p className="mt-0.5 truncate text-xs text-white/50">
+          {show.type === 'movie' ? '🎬' : '📺'} {show.release_year ?? '—'} · {show.type === 'movie' ? t.movie : t.series}
+          {show.genres?.[0] && <span className="text-white/30"> · {show.genres[0].name}</span>}
         </p>
       </div>
     </button>
