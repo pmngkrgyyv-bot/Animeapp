@@ -5,6 +5,20 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 // Telegram webhook: auto-confirm subscriptions from ABA Merchant's
 // payment-notification group.
 //
+// MATCHING RULE (single source of truth): a request is only ever
+// confirmed when the notification text contains the exact 6-character
+// `match_code` that was generated for that request. There is no
+// amount-based fallback anymore — every KHQR the app shows already has
+// the amount baked into the code (the payer's banking app won't let
+// them change it), so the amount can never actually mismatch, and
+// trying to "double check" it only caused two problems in practice:
+//   1. Two people paying the same plan around the same time made the
+//      amount ambiguous, so their payment got wrongly flagged 'failed'.
+//   2. It gave a second way for a request to get stuck, instead of
+//      just... matching the code and unlocking.
+// match_code is globally unique (DB constraint), so code-only matching
+// can never be ambiguous between concurrent requests.
+//
 // SETUP (do this once):
 //   1. Create/reuse a bot via @BotFather, get its token.
 //   2. In BotFather: /setprivacy -> Disable for this bot, so it can
@@ -28,39 +42,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, X-Telegram-Bot-Api-Secret-Token",
 };
 
-// Matches "$2.00", "USD 2", "2.00$", "7$", "$0.01", etc. — the $ or USD
-// marker is REQUIRED on at least one side, so we never pick up a stray
-// plain number (phone digits, "6 characters", a timestamp) from the group
-// chat and mistake it for a payment amount.
-const AMOUNT_PATTERN = /\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*\$|USD\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*USD/gi;
-
-// A match_code is 6 uppercase letters/digits (see generate_match_code()).
+// A match_code is 6 uppercase letters/digits (see generate_match_code()
+// in the DB). Word-boundary so it doesn't grab a substring of a longer
+// alphanumeric token in the notification.
 const CODE_PATTERN = /\b([A-Z0-9]{6})\b/g;
-
-/**
- * Extract all numerical amounts from text and return them sorted.
- * Filters out amounts that are clearly not real payments (< 0.01 or > 100).
- * The lower bound used to be 0.50, which silently swallowed small test
- * transfers (e.g. $0.01) — now that the pattern above requires an
- * explicit $/USD marker, a low floor is safe.
- */
-function extractAmounts(text: string): number[] {
-  const amounts = new Set<number>();
-  let m: RegExpExecArray | null;
-  
-  AMOUNT_PATTERN.lastIndex = 0;
-  while ((m = AMOUNT_PATTERN.exec(text)) !== null) {
-    const raw = m[1] ?? m[2] ?? m[3] ?? m[4];
-    if (!raw) continue;
-    
-    const n = parseFloat(raw);
-    if (Number.isFinite(n) && n >= 0.01 && n <= 100) {
-      amounts.add(n);
-    }
-  }
-  
-  return Array.from(amounts).sort((a, b) => a - b);
-}
 
 function extractCandidateCodes(text: string): string[] {
   const upper = text.toUpperCase();
@@ -78,11 +63,11 @@ async function replyToGroup(token: string, chatId: number, text: string) {
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        chat_id: chatId, 
-        text, 
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
         disable_notification: true,
-        parse_mode: "HTML"
+        parse_mode: "HTML",
       }),
     });
   } catch {
@@ -145,102 +130,44 @@ Deno.serve(async (req: Request) => {
     return ack();
   }
 
-  const amounts = extractAmounts(text);
   const candidateCodes = extractCandidateCodes(text);
-
-  console.log(`Extracted amounts: ${amounts.join(", ")}`);
   console.log(`Extracted codes: ${candidateCodes.join(", ")}`);
+
+  if (candidateCodes.length === 0) {
+    console.log("[NO_MATCH] No match_code found in notification text.");
+    return ack();
+  }
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
   try {
-    let matchedId: string | null = null;
-    let matchReason = "";
+    const { data: rows, error: lookupError } = await adminClient
+      .from("subscription_requests")
+      .select("id, match_code")
+      .eq("status", "pending")
+      .in("match_code", candidateCodes);
 
-    // Primary signal: a unique match_code found in the notification text.
-    if (candidateCodes.length > 0) {
-      const { data: rows } = await adminClient
-        .from("subscription_requests")
-        .select("id, match_code, amount")
-        .eq("status", "pending")
-        .in("match_code", candidateCodes);
-
-      if (rows && rows.length === 1) {
-        matchedId = rows[0].id;
-        matchReason = `match_code: ${rows[0].match_code}`;
-      } else if (rows && rows.length > 1) {
-        console.log(`[AMBIGUOUS] Multiple rows match codes: ${rows.map(r => r.match_code).join(", ")}`);
-      }
-    }
-
-    // Fallback: exact amount match among recent pending requests
-    // Only if no code matched above.
-    if (!matchedId && amounts.length > 0) {
-      const since = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-      
-      // Try each extracted amount, in order of specificity
-      for (const amount of amounts) {
-        const { data: rows } = await adminClient
-          .from("subscription_requests")
-          .select("id, amount, created_at")
-          .eq("status", "pending")
-          .eq("amount", amount)
-          .gte("created_at", since);
-
-        if (rows && rows.length === 1) {
-          matchedId = rows[0].id;
-          matchReason = `amount: $${amount} (created at ${rows[0].created_at})`;
-          break;
-        } else if (rows && rows.length > 1) {
-          console.log(`[AMBIGUOUS] Multiple rows match amount $${amount}: ${rows.length} rows`);
-          // Continue to next amount
-        }
-      }
-    }
-
-    if (!matchedId) {
-      // No exact-amount / code match. If there's exactly one pending
-      // request outstanding right now, this notification is almost
-      // certainly about it — just for a different amount (underpaid,
-      // overpaid, or a stray notification). Flag it 'failed' so the app
-      // (which is polling) can immediately tell the user to retry instead
-      // of silently sitting on "pending" until the on-screen timer runs
-      // out. This is a best-effort heuristic — with more than one
-      // outstanding request we can't tell whose payment this was, so we
-      // deliberately leave those alone.
-      if (amounts.length > 0) {
-        const since = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-        const { data: pendingRows } = await adminClient
-          .from("subscription_requests")
-          .select("id, amount, created_at")
-          .eq("status", "pending")
-          .gte("created_at", since);
-
-        if (pendingRows && pendingRows.length === 1) {
-          const lone = pendingRows[0];
-          console.log(
-            `[MISMATCH] Notification amount(s) [${amounts.join(", ")}] don't match the ` +
-            `lone pending request's amount ($${lone.amount}, id ${lone.id}) — marking failed.`
-          );
-          const { error: failError } = await adminClient
-            .from("subscription_requests")
-            .update({ status: "failed", verified_method: "telegram_amount_mismatch" })
-            .eq("id", lone.id)
-            .eq("status", "pending"); // guard against a race
-          if (failError) console.error("Failed to flag amount mismatch:", failError);
-        } else if (pendingRows && pendingRows.length > 1) {
-          console.log(`[AMBIGUOUS] ${pendingRows.length} pending requests outstanding — can't tell which one this notification is about.`);
-        }
-      }
-
-      console.log(
-        `[NO_MATCH] Could not find unambiguous pending request to confirm. ` +
-        `Codes: [${candidateCodes.join(", ")}], Amounts: [${amounts.join(", ")}]`
-      );
+    if (lookupError) {
+      console.error("Lookup error:", lookupError);
       return ack();
     }
 
-    console.log(`[MATCHED] Request ID: ${matchedId}, Reason: ${matchReason}`);
+    if (!rows || rows.length === 0) {
+      console.log(`[NO_MATCH] No pending request for codes: [${candidateCodes.join(", ")}]`);
+      return ack();
+    }
+
+    // match_code is unique per row, so this can only happen if the
+    // notification text happened to contain more than one valid-looking
+    // 6-char token and more than one of them is a live pending request
+    // (extremely unlikely, but we refuse rather than guess).
+    if (rows.length > 1) {
+      console.log(`[AMBIGUOUS] Multiple pending rows match codes: ${rows.map((r) => r.match_code).join(", ")}`);
+      return ack();
+    }
+
+    const matchedId = rows[0].id;
+    console.log(`[MATCHED] Request ID: ${matchedId}, code: ${rows[0].match_code}`);
 
     const { data: updated, error } = await adminClient
       .from("subscription_requests")
@@ -257,13 +184,12 @@ Deno.serve(async (req: Request) => {
 
     if (updated) {
       console.log(`[SUCCESS] Confirmed request: ${updated.id} (plan: ${updated.plan})`);
-      
-      // Optional: reply in the group if bot token is configured
+
       if (botToken && chatId) {
         await replyToGroup(
           botToken,
           chatId,
-          `✅ <b>${updated.plan.toUpperCase()}</b> subscription confirmed automatically.`
+          `✅ <b>${updated.plan.toUpperCase()}</b> subscription confirmed automatically.`,
         );
       }
     } else {
