@@ -5,19 +5,23 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 // Telegram webhook: auto-confirm subscriptions from ABA Merchant's
 // payment-notification group.
 //
-// MATCHING RULE (single source of truth): a request is only ever
-// confirmed when the notification text contains the exact 6-character
-// `match_code` that was generated for that request. There is no
-// amount-based fallback anymore — every KHQR the app shows already has
-// the amount baked into the code (the payer's banking app won't let
-// them change it), so the amount can never actually mismatch, and
-// trying to "double check" it only caused two problems in practice:
-//   1. Two people paying the same plan around the same time made the
-//      amount ambiguous, so their payment got wrongly flagged 'failed'.
-//   2. It gave a second way for a request to get stuck, instead of
-//      just... matching the code and unlocking.
-// match_code is globally unique (DB constraint), so code-only matching
-// can never be ambiguous between concurrent requests.
+// MATCHING RULES, tried in order:
+//   1. CODE MATCH — the notification text contains the exact 6-char
+//      `match_code` for a pending request. This is unambiguous by
+//      construction (match_code is globally unique), so it always wins
+//      when present.
+//   2. AMOUNT FALLBACK — ABA's merchant notification for a KHQR "scan to
+//      pay" transfer does NOT carry a note/reference field through, so
+//      match_code almost never actually appears in real notifications.
+//      Since every plan has a distinct, fixed price ($2 / $4 / $7 / $28),
+//      we can still safely auto-confirm on amount ALONE, but only when
+//      it is unambiguous: exactly one 'pending' request for that amount
+//      exists, created within the last AMOUNT_MATCH_WINDOW_MIN minutes.
+//      If two or more pending requests share the same amount in that
+//      window, we refuse to guess — both stay 'pending' until one of
+//      them ages out or an admin resolves it manually. This mirrors why
+//      amount-only matching was removed before: it's safe as long as we
+//      fail closed on ambiguity instead of picking one.
 //
 // SETUP (do this once):
 //   1. Create/reuse a bot via @BotFather, get its token.
@@ -56,6 +60,37 @@ function extractCandidateCodes(text: string): string[] {
     codes.add(m[1]);
   }
   return [...codes];
+}
+
+// Only these exact prices are ever valid plan prices — keep in sync with
+// PLANS in src/components/SubscriptionModal.tsx and the
+// enforce_subscription_request_amount() DB trigger.
+const VALID_PLAN_AMOUNTS = new Set([2, 4, 7, 28]);
+
+// A pending request is only eligible for amount-fallback matching while
+// it's this fresh. Keeps an old abandoned 'pending' row from grabbing a
+// much later, unrelated payment of the same amount. The in-app QR modal
+// itself already expires/cancels a request after 3 minutes, so this only
+// needs to cover network delay / a slow payer, not act as the real timer.
+const AMOUNT_MATCH_WINDOW_MIN = 15;
+
+// The recipient name ABA prints on every notification for this merchant.
+// Requiring it means a stray/unrelated message in the group (or a
+// notification for a *different* merchant account, if the group is ever
+// reused) can never be mistaken for a payment to us.
+const REQUIRED_MERCHANT_PHRASE = "PANG SOK HENG";
+
+// Matches "$2.00", "2.00$", "USD2.00", "2.00 USD" etc. and captures the
+// numeric amount. ABA's notification format leads with "$X.XX" so this
+// covers the real case; the extra alternatives are defensive.
+const AMOUNT_PATTERN = /(?:\$|USD)\s*([0-9]+(?:\.[0-9]{1,2})?)|([0-9]+(?:\.[0-9]{1,2})?)\s*(?:\$|USD)/i;
+
+function extractAmount(text: string): number | null {
+  const m = AMOUNT_PATTERN.exec(text);
+  if (!m) return null;
+  const raw = m[1] ?? m[2];
+  const value = Math.round(parseFloat(raw) * 100) / 100;
+  return Number.isFinite(value) ? value : null;
 }
 
 async function replyToGroup(token: string, chatId: number, text: string) {
@@ -130,48 +165,88 @@ Deno.serve(async (req: Request) => {
     return ack();
   }
 
-  const candidateCodes = extractCandidateCodes(text);
-  console.log(`Extracted codes: ${candidateCodes.join(", ")}`);
-
-  if (candidateCodes.length === 0) {
-    console.log("[NO_MATCH] No match_code found in notification text.");
-    return ack();
-  }
-
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
   try {
-    const { data: rows, error: lookupError } = await adminClient
-      .from("subscription_requests")
-      .select("id, match_code")
-      .eq("status", "pending")
-      .in("match_code", candidateCodes);
+    let matchedId: string | null = null;
+    let matchedVia = "";
 
-    if (lookupError) {
-      console.error("Lookup error:", lookupError);
-      return ack();
+    // --- 1. Try code match first (unambiguous when it hits) -----------
+    const candidateCodes = extractCandidateCodes(text);
+    console.log(`Extracted codes: ${candidateCodes.join(", ")}`);
+
+    if (candidateCodes.length > 0) {
+      const { data: rows, error: lookupError } = await adminClient
+        .from("subscription_requests")
+        .select("id, match_code")
+        .eq("status", "pending")
+        .in("match_code", candidateCodes);
+
+      if (lookupError) {
+        console.error("Code lookup error:", lookupError);
+      } else if (rows && rows.length === 1) {
+        matchedId = rows[0].id;
+        matchedVia = "telegram_code";
+        console.log(`[MATCHED:code] Request ID: ${matchedId}, code: ${rows[0].match_code}`);
+      } else if (rows && rows.length > 1) {
+        console.log(`[AMBIGUOUS:code] Multiple pending rows match codes: ${rows.map((r) => r.match_code).join(", ")}`);
+      }
     }
 
-    if (!rows || rows.length === 0) {
-      console.log(`[NO_MATCH] No pending request for codes: [${candidateCodes.join(", ")}]`);
-      return ack();
-    }
+    // --- 2. Fall back to amount match if no code matched ---------------
+    // Real ABA merchant notifications for a static "scan to pay" KHQR
+    // don't carry the note field through, so this is the common path in
+    // practice, not a rare fallback.
+    if (!matchedId) {
+      if (!text.toUpperCase().includes(REQUIRED_MERCHANT_PHRASE)) {
+        console.log("[NO_MATCH] Merchant phrase not found; skipping amount fallback.");
+        return ack();
+      }
 
-    // match_code is unique per row, so this can only happen if the
-    // notification text happened to contain more than one valid-looking
-    // 6-char token and more than one of them is a live pending request
-    // (extremely unlikely, but we refuse rather than guess).
-    if (rows.length > 1) {
-      console.log(`[AMBIGUOUS] Multiple pending rows match codes: ${rows.map((r) => r.match_code).join(", ")}`);
-      return ack();
-    }
+      const amount = extractAmount(text);
+      console.log(`Extracted amount: ${amount}`);
 
-    const matchedId = rows[0].id;
-    console.log(`[MATCHED] Request ID: ${matchedId}, code: ${rows[0].match_code}`);
+      if (amount === null || !VALID_PLAN_AMOUNTS.has(amount)) {
+        console.log(`[NO_MATCH] No usable amount (or not a known plan price) in: "${text}"`);
+        return ack();
+      }
+
+      const sinceIso = new Date(Date.now() - AMOUNT_MATCH_WINDOW_MIN * 60_000).toISOString();
+
+      const { data: rows, error: lookupError } = await adminClient
+        .from("subscription_requests")
+        .select("id, amount, created_at")
+        .eq("status", "pending")
+        .eq("amount", amount)
+        .gte("created_at", sinceIso);
+
+      if (lookupError) {
+        console.error("Amount lookup error:", lookupError);
+        return ack();
+      }
+
+      if (!rows || rows.length === 0) {
+        console.log(`[NO_MATCH] No pending request for amount $${amount} in the last ${AMOUNT_MATCH_WINDOW_MIN}min.`);
+        return ack();
+      }
+
+      if (rows.length > 1) {
+        // More than one pending request at this exact price right now —
+        // refuse to guess which payer this notification belongs to.
+        // They'll need to wait for a match_code hit or an admin to
+        // resolve it manually.
+        console.log(`[AMBIGUOUS:amount] ${rows.length} pending requests for amount $${amount}: ${rows.map((r) => r.id).join(", ")}`);
+        return ack();
+      }
+
+      matchedId = rows[0].id;
+      matchedVia = "telegram_amount";
+      console.log(`[MATCHED:amount] Request ID: ${matchedId}, amount: $${amount}`);
+    }
 
     const { data: updated, error } = await adminClient
       .from("subscription_requests")
-      .update({ status: "confirmed", verified_method: "telegram_auto" })
+      .update({ status: "confirmed", verified_method: matchedVia })
       .eq("id", matchedId)
       .eq("status", "pending") // guard against a race with another confirmation
       .select("id, user_id, plan")
@@ -183,7 +258,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (updated) {
-      console.log(`[SUCCESS] Confirmed request: ${updated.id} (plan: ${updated.plan})`);
+      console.log(`[SUCCESS] Confirmed request: ${updated.id} (plan: ${updated.plan}, via: ${matchedVia})`);
 
       if (botToken && chatId) {
         await replyToGroup(
