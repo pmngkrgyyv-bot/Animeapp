@@ -97,6 +97,7 @@ export default function SubscriptionModal({ onClose }: Props) {
   const [qrSaved, setQrSaved] = useState(false);
   const [matchCode, setMatchCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
+  const [requestId, setRequestId] = useState<string | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -106,6 +107,48 @@ export default function SubscriptionModal({ onClose }: Props) {
   const stopTimers = () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
+  };
+
+  // Best-effort: mark an abandoned request as no longer pending, so the
+  // telegram-webhook's `.eq('status','pending')` lookup stops treating
+  // its match_code as live. Two things can make this silently do
+  // nothing, so we guard against both:
+  //   1. 'cancelled' may not exist as a valid value for this column yet
+  //      — if the update errors, we fall back to 'failed', which is
+  //      already used elsewhere and needs no schema change.
+  //   2. Supabase's client does NOT return an error when a row-level
+  //      security policy blocks the write — it just reports 0 rows
+  //      updated. We check for that explicitly and warn in the console
+  //      so a missing UPDATE policy is visible instead of invisible.
+  const cancelRequest = async (id: string) => {
+    try {
+      const first = await supabase
+        .from('subscription_requests')
+        .update({ status: 'cancelled' })
+        .eq('id', id)
+        .eq('status', 'pending')
+        .select('id');
+
+      if (first.error) {
+        const fallback = await supabase
+          .from('subscription_requests')
+          .update({ status: 'failed' })
+          .eq('id', id)
+          .eq('status', 'pending')
+          .select('id');
+        if (fallback.error || !fallback.data?.length) {
+          console.warn('[subscription] could not cancel pending request', id, fallback.error);
+        }
+      } else if (!first.data?.length) {
+        console.warn(
+          '[subscription] cancel affected 0 rows for request',
+          id,
+          '— either it was already confirmed, or an UPDATE policy on subscription_requests is missing/blocking this.',
+        );
+      }
+    } catch (err) {
+      console.warn('[subscription] cancelRequest failed', id, err);
+    }
   };
 
   useEffect(() => () => stopTimers(), []);
@@ -151,12 +194,13 @@ export default function SubscriptionModal({ onClose }: Props) {
     setTimeout(() => setCodeCopied(false), 2000);
   };
 
-  const startListening = (requestId: string, code: string | null) => {
+  const startListening = (newRequestId: string, code: string | null) => {
     setSecondsLeft(COUNTDOWN_SECONDS);
     setStep('qr');
     setQrSaved(false);
     setCodeCopied(false);
     setMatchCode(code);
+    setRequestId(newRequestId);
     let remaining = COUNTDOWN_SECONDS;
     stopTimers();
     countdownRef.current = setInterval(() => {
@@ -168,7 +212,7 @@ export default function SubscriptionModal({ onClose }: Props) {
       const { data } = await supabase
         .from('subscription_requests')
         .select('status')
-        .eq('id', requestId)
+        .eq('id', newRequestId)
         .maybeSingle();
       if (data?.status === 'confirmed') { stopTimers(); setStep('success'); }
       else if (data?.status === 'failed') { stopTimers(); setStep('failed'); }
@@ -178,6 +222,14 @@ export default function SubscriptionModal({ onClose }: Props) {
   const doCreateRequest = async (isRetry: boolean) => {
     setError('');
     setPaying(true);
+    // A leftover pending request from a prior attempt (timed out, or
+    // abandoned and re-opened) should never keep listening once we're
+    // about to mint a new match_code for the same purchase.
+    if (requestId) {
+      cancelRequest(requestId);
+      setRequestId(null);
+      setMatchCode(null);
+    }
     try {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData.user) { setError(t.subNotSignedIn); return; }
@@ -201,6 +253,31 @@ export default function SubscriptionModal({ onClose }: Props) {
     }
   };
 
+  // Closing the modal (X, or the backdrop) while a request is pending
+  // abandons that request: cancel it so its match_code stops being a
+  // live target for the webhook, and the next "Pay" always starts fresh.
+  const handleClose = () => {
+    stopTimers();
+    if (requestId && (step === 'qr' || step === 'timeout' || step === 'failed')) {
+      cancelRequest(requestId);
+      setRequestId(null);
+      setMatchCode(null);
+    }
+    onClose();
+  };
+
+  // "Back" also abandons the current pending request — same reasoning
+  // as handleClose, just returning to plan selection instead of exiting.
+  const handleBack = () => {
+    stopTimers();
+    if (requestId) {
+      cancelRequest(requestId);
+      setRequestId(null);
+      setMatchCode(null);
+    }
+    setStep('summary');
+  };
+
   const urgent = secondsLeft <= 10;
   const countdownProgress = secondsLeft / COUNTDOWN_SECONDS;
 
@@ -214,7 +291,7 @@ export default function SubscriptionModal({ onClose }: Props) {
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center overflow-hidden p-4"
       style={{ backgroundColor: 'rgba(4,4,10,0.72)', backdropFilter: 'blur(10px)' }}
-      onClick={step !== 'qr' ? onClose : undefined}
+      onClick={step !== 'qr' ? handleClose : undefined}
     >
       {/* Atmospheric silhouette backdrop — large dim watermark + amber glow, no click target */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -261,7 +338,7 @@ export default function SubscriptionModal({ onClose }: Props) {
             {/* Header */}
             <div className="relative px-4 pb-2 pt-5 text-center">
               <button
-                onClick={onClose}
+                onClick={handleClose}
                 aria-label={t.subCloseBtn}
                 className="absolute right-3.5 top-3.5 flex h-8 w-8 items-center justify-center rounded-full transition hover:bg-white/10"
                 style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)' }}
@@ -448,7 +525,7 @@ export default function SubscriptionModal({ onClose }: Props) {
             {/* Top bar */}
             <div className="flex items-center justify-between px-3.5 pb-2 pt-4">
               <button
-                onClick={() => { stopTimers(); setStep('summary'); }}
+                onClick={handleBack}
                 className="flex items-center gap-1 rounded-xl px-3 py-1.5 text-[12px] font-medium text-white/60 transition hover:bg-white/08 hover:text-white"
                 style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)' }}
               >
@@ -480,7 +557,7 @@ export default function SubscriptionModal({ onClose }: Props) {
               </div>
 
               <button
-                onClick={onClose}
+                onClick={handleClose}
                 aria-label={t.subCloseBtn}
                 className="flex h-8 w-8 items-center justify-center rounded-full transition hover:bg-white/10"
                 style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.45)' }}
@@ -549,29 +626,48 @@ export default function SubscriptionModal({ onClose }: Props) {
                     Note" field before confirming the transfer. */}
                 {matchCode && (
                   <div className="px-5 pb-3 pt-4">
-                    <p className="flex items-center justify-center gap-1.5 text-[11px] font-semibold" style={{ color: COLOR.gold }}>
+                    <p
+                      className="flex items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]"
+                      style={{ color: COLOR.gold }}
+                    >
                       {t.subStepCodeTitle}
                     </p>
-                    <div
-                      className="mt-1.5 flex items-center justify-between gap-2 rounded-xl px-3 py-2"
-                      style={{ border: `1px solid ${COLOR.gold}30`, background: `${COLOR.gold}0D` }}
-                    >
-                      <p
-                        className="text-[19px] font-black tracking-[0.22em] text-white"
-                        style={{ fontFamily: DISPLAY_FONT }}
-                      >
-                        {matchCode}
-                      </p>
-                      <button
-                        onClick={copyMatchCode}
-                        className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition active:scale-[0.97]"
-                        style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)' }}
-                      >
-                        {codeCopied ? <Check size={11} /> : <Copy size={11} />}
-                        {codeCopied ? t.subCopiedBtn : t.subCopyBtn}
-                      </button>
+
+                    {/* Segmented "OTP cell" layout — each character gets
+                        its own tile so the code is unmistakable at a
+                        glance and easy to copy character-by-character
+                        into the bank app if clipboard paste ever fails. */}
+                    <div className="mt-2 flex items-center justify-center gap-[5px]">
+                      {matchCode.split('').map((ch, i) => (
+                        <div
+                          key={i}
+                          className="flex h-11 w-8 items-center justify-center rounded-[10px] text-[19px] font-black text-white"
+                          style={{
+                            fontFamily: DISPLAY_FONT,
+                            border: `1px solid ${COLOR.gold}45`,
+                            background: `linear-gradient(180deg,${COLOR.gold}1C,${COLOR.gold}0A)`,
+                            boxShadow: `0 2px 8px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.06)`,
+                          }}
+                        >
+                          {ch}
+                        </div>
+                      ))}
                     </div>
-                    <p className="mt-1 text-center text-[10px] leading-relaxed text-white/30">
+
+                    <button
+                      onClick={copyMatchCode}
+                      className="mx-auto mt-2.5 flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[11px] font-semibold transition active:scale-[0.97]"
+                      style={{
+                        background: codeCopied ? `${COLOR.primary}26` : 'rgba(255,255,255,0.08)',
+                        color: codeCopied ? COLOR.primaryLight : 'rgba(255,255,255,0.7)',
+                        border: `1px solid ${codeCopied ? `${COLOR.primary}40` : 'rgba(255,255,255,0.08)'}`,
+                      }}
+                    >
+                      {codeCopied ? <Check size={12} /> : <Copy size={12} />}
+                      {codeCopied ? t.subCopiedBtn : t.subCopyBtn}
+                    </button>
+
+                    <p className="mx-auto mt-2 max-w-[230px] text-center text-[10px] leading-relaxed text-white/30">
                       {t.subStepCodeDesc}
                     </p>
                   </div>
@@ -613,47 +709,52 @@ export default function SubscriptionModal({ onClose }: Props) {
                     )}
                   </div>
                 </div>
-              </div>
-            </div>
 
-            {/* Save button */}
-            <div className="px-4 pb-2 pt-2.5">
-              <button
-                onClick={saveQr}
-                className="mx-auto flex items-center justify-center gap-1.5 rounded-full px-5 py-2.5 text-[12px] font-semibold transition hover:brightness-110 active:scale-[0.98]"
-                style={{
-                  border: `1.5px solid ${COLOR.gold}40`,
-                  background: `${COLOR.gold}14`,
-                  color: COLOR.gold,
-                }}
-              >
-                <Download size={13} />
-                {t.subSaveQr}
-              </button>
-            </div>
-
-            {/* Small "waiting for payment" notice — only appears once the user taps Save QR */}
-            {qrSaved && (
-              <div
-                className="mx-4 mb-2 flex animate-slide-up-fade items-center gap-2.5 rounded-2xl px-3.5 py-3"
-                style={{
-                  border: `1px solid ${COLOR.primary}40`,
-                  background: `linear-gradient(135deg,${COLOR.primary}1F,${COLOR.primary}0A)`,
-                  boxShadow: `0 8px 24px -8px ${COLOR.primary}59`,
-                }}
-              >
+                {/* Save button — lives inside the card now, as its own
+                    strip below the QR, separated by a hairline rather
+                    than floating below the ticket as a detached control. */}
                 <div
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
-                  style={{ background: `${COLOR.primary}26` }}
+                  className="px-6 pb-4 pt-1"
+                  style={{ borderTop: `1px solid ${COLOR.gold}1F` }}
                 >
-                  <Loader2 size={13} className="animate-spin" style={{ color: COLOR.primaryLight }} />
-                </div>
-                <div>
-                  <p className="text-[12px] font-semibold text-white/80">{t.subWaitingPayment}</p>
-                  <p className="text-[11px] text-white/40">{t.subAutoUnlockNote}</p>
+                  <button
+                    onClick={saveQr}
+                    className="mx-auto mt-3 flex items-center justify-center gap-1.5 rounded-full px-5 py-2.5 text-[12px] font-semibold transition hover:brightness-110 active:scale-[0.98]"
+                    style={{
+                      border: `1.5px solid ${COLOR.gold}40`,
+                      background: `${COLOR.gold}14`,
+                      color: COLOR.gold,
+                    }}
+                  >
+                    {qrSaved ? <Check size={13} /> : <Download size={13} />}
+                    {t.subSaveQr}
+                  </button>
                 </div>
               </div>
-            )}
+            </div>
+
+            {/* "Waiting for payment" notice — shown as soon as the QR
+                step opens, in step with the cooldown above, rather than
+                gated behind the Save QR button. */}
+            <div
+              className="mx-4 mb-2 flex animate-slide-up-fade items-center gap-2.5 rounded-2xl px-3.5 py-3"
+              style={{
+                border: `1px solid ${COLOR.primary}40`,
+                background: `linear-gradient(135deg,${COLOR.primary}1F,${COLOR.primary}0A)`,
+                boxShadow: `0 8px 24px -8px ${COLOR.primary}59`,
+              }}
+            >
+              <div
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
+                style={{ background: `${COLOR.primary}26` }}
+              >
+                <Loader2 size={13} className="animate-spin" style={{ color: COLOR.primaryLight }} />
+              </div>
+              <div>
+                <p className="text-[12px] font-semibold text-white/80">{t.subWaitingPayment}</p>
+                <p className="text-[11px] text-white/40">{t.subAutoUnlockNote}</p>
+              </div>
+            </div>
 
             {/* Footer */}
             <div className="flex items-center justify-center gap-1.5 border-t border-white/[0.04] py-2.5">
