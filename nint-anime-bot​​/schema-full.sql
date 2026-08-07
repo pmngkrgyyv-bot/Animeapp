@@ -67,3 +67,8 @@ alter table episodes add column if not exists posted_to_channel boolean not null
 -- 5. Column ស្រេចចិត្ត សម្រាប់ដាក់ Trailer video (mp4 URL) — Bot នឹងផ្ញើវាជា
 -- video ចាក់បានផ្ទាល់ក្នុង Telegram ជំនួសរូបភាព ប្រសិនបើមានតម្លៃ
 alter table shows add column if not exists trailer_url text;
+
+-- 6. Column សម្រាប់តាមដានថាតើ "រឿង" (show) មួយបានផុសប្រកាស "🆕 រឿងថ្មី" ទៅ Channel ហើយឬនៅ
+-- (Bot ផុសទៅ Channel តាម show ជំនួសតាម episode — ដើម្បីមិនឲ្យព័ត៌មានវគ្គចេញទៅ Channel ជាសាធារណៈ
+--  ហើយរក្សា VIP paywall ឲ្យរឹងមាំ; column `episodes.posted_to_channel` ខាងលើលែងប្រើទៀតហើយ)
+alter table shows add column if not exists posted_to_channel boolean not null default false;
